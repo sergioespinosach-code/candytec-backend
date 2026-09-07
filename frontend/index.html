@@ -938,6 +938,7 @@ function renderView(){
   else if(v==='por-facturar'){
     html=listView({title:'Por facturar',sub:'Pedidos nuevos, listos para emitir su primera factura',
       baseFn:()=>ORDERS.filter(o=>o.state==='POR_FACTURAR'&&!esPedidoPorCompletar(o)),
+      note:botonExcelPorFacturar(),
       cardFn:o=>orderCard(o,
         `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();returnOrder('${o.id}')">Devolver</button>
          <button class="btn btn-gold btn-sm" onclick="event.stopPropagation();openFacturar('${o.id}')">Facturar</button>`),
@@ -3804,6 +3805,96 @@ async function confirmResetData(){
 /* ============================================================
    EXPORTAR EXCEL COMPLETO
    ============================================================ */
+/* Exportación de despacho: estado exacto POR_FACTURAR, sin filtros de pantalla. */
+function botonExcelPorFacturar(){
+  return `<div style="margin:0 0 16px"><button class="btn btn-gold" onclick="exportarExcelPorFacturar()">⇩ Excel · Por facturar</button><div class="hint" style="margin-top:6px">Todos los pedidos en estado Por facturar, sin aplicar los filtros de pantalla. Cantidades pendientes de facturar.</div></div>`;
+}
+function datosExcelPorFacturar(pedidos,clientes,catalogo){
+  const seleccion=pedidos.filter(o=>o.state==='POR_FACTURAR');
+  const grupos=new Map(), nombres=new Set();
+  const detalle=[];
+  const num=v=>Number.isFinite(Number(v))?Number(v):0;
+  seleccion.forEach(o=>{
+    const cliente=clientes.find(c=>o.ruc&&c.ruc===o.ruc);
+    const ciudad=o.ciudad||'', direccion=o.direccionEntrega||'';
+    // Mantener separados los destinos de un mismo cliente para planificar la ruta.
+    const clave=JSON.stringify([o.ruc||o.client,ciudad,direccion]);
+    if(!grupos.has(clave)) grupos.set(clave,{cliente:o.client||'',ruc:String(o.ruc||''),ciudad,direccion,
+      sector:cliente?.sector||'',pedidos:new Set(),fechas:new Set(),vendedores:new Set(),cantidades:new Map()});
+    const g=grupos.get(clave);
+    g.pedidos.add(String(o.id)); if(o.fechaEntrega)g.fechas.add(o.fechaEntrega); if(o.vendedor)g.vendedores.add(o.vendedor);
+    const productos=new Map();
+    (o.products||[]).forEach(p=>productos.set(p.name,(productos.get(p.name)||0)+num(p.qty)));
+    productos.forEach((cantidad,nombre)=>{
+      const facturado=(o.entregas||[]).reduce((s,e)=>s+(e.items||[]).filter(i=>i.name===nombre).reduce((a,i)=>a+num(i.qty),0),0);
+      const pendiente=Math.max(0,Math.round((cantidad-facturado)*100)/100);
+      if(pendiente<=0)return;
+      nombres.add(nombre);
+      g.cantidades.set(nombre,(g.cantidades.get(nombre)||0)+pendiente);
+      detalle.push([String(o.id),o.client||'',String(o.ruc||''),ciudad,direccion,o.fechaEntrega||'',o.vendedor||'',nombre,cantidad,facturado,pendiente]);
+    });
+  });
+  const productos=[...nombres].sort((a,b)=>a.localeCompare(b,'es'));
+  const pesos=productos.map(nombre=>{const p=catalogo.find(c=>c.nombre===nombre);return p&&num(p.peso_bulto)>0?num(p.peso_bulto):null;});
+  const filas=[...grupos.values()].sort((a,b)=>a.ciudad.localeCompare(b.ciudad,'es')||a.cliente.localeCompare(b.cliente,'es'));
+  return {seleccion,productos,pesos,filas,detalle};
+}
+async function exportarExcelPorFacturar(){
+  if(guardDouble('exportarExcelPorFacturar'))return;
+  try{
+    if(typeof XLSX==='undefined'){toast('No se pudo cargar Excel. Revisa tu conexión y recarga la página.');return;}
+    // Consultas de lectura: exportar una instantánea reciente sin modificar los pedidos.
+    const [pedidos,clientes,catalogo]=await Promise.all([apiGet('/api/pedidos'),apiGet('/api/clientes'),apiGet('/api/catalogo')]);
+    const d=datosExcelPorFacturar(pedidos.map(mapPedido),clientes.map(mapCliente),catalogo);
+    if(!d.seleccion.length){toast('No hay pedidos en estado Por facturar.');return;}
+    const wb=XLSX.utils.book_new();
+    const cabecera=['Ciudad','Cliente','RUC / CI','Dirección de entrega','Sector','Pedidos','Fechas de entrega','Vendedores',...d.productos,'Peso pendiente (kg)','Observación peso'];
+    const n=d.productos.length, colPeso=8+n, colNota=9+n;
+    const finProducto=XLSX.utils.encode_col(7+n);
+    const datos=[['PESO POR BULTO (kg)','','','','','','','',...d.pesos,'','Completar los pesos vacíos para calcular todos los kg.'],cabecera];
+    const formula=(f)=>({t:'n',f});
+    d.filas.forEach((g,i)=>{
+      const r=i+3, cantidades=d.productos.map(p=>g.cantidades.get(p)||0);
+      const faltan=n?`COUNTIFS(I${r}:${finProducto}${r},">0",I$1:${finProducto}$1,"<=0")`: '0';
+      const peso=n?`IF(${faltan}>0,"",SUMPRODUCT(I${r}:${finProducto}${r},I$1:${finProducto}$1))`:'0';
+      datos.push([g.ciudad,g.cliente,g.ruc,g.direccion,g.sector,[...g.pedidos].join(', '),[...g.fechas].join(', '),[...g.vendedores].join(', '),...cantidades,
+        formula(peso),{t:'s',f:`IF(${faltan}>0,"Falta peso por bulto","Completo")`}]);
+    });
+    const ultima=datos.length, total=['TOTAL','','','','','','',''];
+    for(let c=8;c<colPeso;c++){const l=XLSX.utils.encode_col(c);total.push(formula(`SUM(${l}3:${l}${ultima})`));}
+    const pesoLetra=XLSX.utils.encode_col(colPeso),notaLetra=XLSX.utils.encode_col(colNota);
+    total.push(formula(`IF(COUNTIF(${notaLetra}3:${notaLetra}${ultima},"Falta peso por bulto")>0,"",SUM(${pesoLetra}3:${pesoLetra}${ultima}))`),'');
+    datos.push(total);
+    const ws=XLSX.utils.aoa_to_sheet(datos);
+    ws['!cols']=[18,30,18,42,22,26,26,24,...d.productos.map(p=>Math.min(32,Math.max(16,p.length+2))),22,38].map(wch=>({wch}));
+    ws['!autofilter']={ref:`A2:${notaLetra}${ultima}`};
+    for(let r=0;r<datos.length;r++)for(let c=8;c<=colPeso;c++){const cell=ws[XLSX.utils.encode_cell({r,c})];if(cell)cell.z='#,##0.00';}
+    XLSX.utils.book_append_sheet(wb,ws,'Despachos por cliente');
+    const detalle=XLSX.utils.aoa_to_sheet([['Pedido','Cliente','RUC / CI','Ciudad','Dirección de entrega','Fecha entrega','Vendedor','Producto','Cantidad pedida','Cantidad facturada','Pendiente por facturar'],...d.detalle]);
+    detalle['!cols']=[20,30,18,18,42,18,24,32,20,20,24].map(wch=>({wch}));
+    detalle['!autofilter']={ref:detalle['!ref']};
+    XLSX.utils.book_append_sheet(wb,detalle,'Detalle por pedido');
+    const notas=XLSX.utils.aoa_to_sheet([
+      ['CANDYTEC — PLANIFICACIÓN DE DESPACHOS',''],
+      ['Exportado',new Date().toLocaleString('es-EC',{timeZone:'America/Guayaquil'})],
+      ['Alcance','Todos los pedidos accesibles al usuario con estado exacto POR_FACTURAR. Sin filtros de pantalla.'],
+      ['Pedidos incluidos',d.seleccion.length],
+      ['Filas','Agrupadas por RUC (o nombre), ciudad y dirección de entrega. Un cliente con varios destinos aparece separado.'],
+      ['Cantidades','Cantidades del pedido menos cantidades ya facturadas en entregas parciales. Productos repetidos se suman.'],
+      ['Unidad','La misma unidad de cantidad registrada en el pedido; el peso usa el peso por bulto del catálogo.'],
+      ['Pesos','Fila 1 editable. Si falta un peso necesario, los kg quedan vacíos y se indica el motivo; no se asume peso cero.'],
+      ['Cálculos','Los totales y kg se recalculan en Excel al editar cantidades o pesos. El detalle conserva la instantánea original.'],
+      ['Otros estados','No incluye pedidos en otros estados aunque tengan productos pendientes.'],
+      ['Filtros de Excel','Los totales SUM incluyen también las filas ocultas por un filtro.'],
+    ]);
+    notas['!cols']=[24,110].map(wch=>({wch}));
+    XLSX.utils.book_append_sheet(wb,notas,'Guía');
+    XLSX.writeFile(wb,'CandyTec_Por_Facturar_'+new Date().toISOString().slice(0,10)+'.xlsx');
+    toast('Excel descargado: '+d.seleccion.length+' pedidos por facturar.');
+  }catch(err){toast('No se pudo descargar el Excel: '+err.message);}
+  finally{releaseGuard('exportarExcelPorFacturar');}
+}
+
 function exportarExcelCompleto(){
   if(!isGerente()){toast('Solo gerencia puede descargar el Excel completo');return;}
   if(typeof XLSX==='undefined'){ toast('No se pudo cargar la librería de Excel — revisa tu conexión a internet'); return; }
@@ -4463,6 +4554,7 @@ function viewProduccionLogistica(){
 
   return pageHead('Producción y logística','Todo lo que falta por fabricar y despachar · incluye pedidos nuevos y lo pendiente de los pedidos por completar')
   + `<div class="section-note"><span class="ni">◎</span><div>Muestra lo que <b>todavía falta por fabricar</b>: pedidos nuevos sin facturar, y la parte pendiente de los pedidos marcados POR COMPLETAR. Lo ya facturado desaparece de aquí porque su despacho ya quedó coordinado.</div></div>`
+  + botonExcelPorFacturar()
   + resumenHTML
   + plControlesHTML()
   + `<div id="plTablaWrap">${plTablaHTML()}</div>`;
