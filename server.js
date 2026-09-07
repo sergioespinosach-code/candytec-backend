@@ -2,6 +2,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const express = require('express');
+const dispatchPlanner = require('./lib/dispatch-planner');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -18,6 +19,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
+app.use('/api/dispatch-plans', express.json({ limit: '2mb' }));
 app.use(express.json());
 
 // Conexión a PostgreSQL
@@ -302,6 +304,7 @@ async function initDB() {
       console.log('Ajuste de secuencia de pedidos: sin cambios necesarios');
     }
 
+    await dispatchPlanner.init(pool);
     console.log('✓ Base de datos inicializada');
   } catch (err) {
     console.error('DB init error:', err);
@@ -338,7 +341,7 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
   res.json({ username: req.user.username, name: req.user.name, role: req.user.role });
 });
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', verifyToken, requireSuperAdmin, async (req, res) => {
   try {
     const { username, password, name, role } = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -837,6 +840,8 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 // ============================================================
 // HEALTH CHECK
 // ============================================================
+dispatchPlanner.register(app, pool, verifyToken);
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
 });

@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),file=path.join(root,'frontend/index.html');
+const source=fs.readFileSync(path.join(root,'lib/planner-core.js'),'utf8');
+const html=fs.readFileSync(file,'utf8');
+const start='/* BEGIN DISPATCH PLANNER CORE */',end='/* END DISPATCH PLANNER CORE */';
+const a=html.indexOf(start),b=html.indexOf(end);
+if(a<0||b<a)throw Error('No se encontró el bloque del planificador.');
+fs.writeFileSync(file,html.slice(0,a+start.length)+'\n'+source+'\n'+html.slice(b));
+console.log('Reglas del planificador sincronizadas.');
