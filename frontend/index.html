@@ -5322,7 +5322,6 @@ function dpSelectVisible(){
   DP.error=skipped?'El máximo es 250 selecciones. Los pedidos adicionales quedaron sin marcar.':'';DP.message='';dpRefresh();
 }
 function dpCandidatesHTML(){
-  if(DP.advanced)return dpAdvancedCandidatesHTML();
   const list=dpFilteredCandidates(),keys=new Set(list.map(s=>s.key)),byKey=new Map(dpCandidates().map(s=>[s.key,s]));
   // Keep selected items visible even when filters change or a source disappears.
   const outside=DP.draft.paradas.filter(p=>!keys.has(p.key));
@@ -5338,12 +5337,11 @@ function dpCandidatesHTML(){
     ${s.blocked?`<p class="dp-alert dp-alert-bad">${dpEscape(s.blocked)}</p>`:''}
     ${info?.changed?'<p class="dp-alert dp-alert-bad">Este pedido cambió. Desmárcalo y vuelve a seleccionarlo con sus datos actuales.</p>':''}
     ${selected&&stop.kind!=='pendiente'?'<p class="dp-muted">La entrega facturada se incluye completa.</p>':''}
-    ${!selected&&!s.items.some(i=>i.available>0)?'<p class="dp-muted">Asignado a otro plan. Puedes consultarlo en Planes guardados.</p>':''}</article>`;
+    ${!selected&&!s.items.some(i=>i.available>0)?'<p class="dp-muted">Cantidad asignada previamente a un plan.</p>':''}</article>`;
   };
   return `<div class="dp-row dp-list-count"><span>${list.length} pedidos / entregas encontrados</span><button class="btn btn-sm" onclick="dpSelectVisible()" ${dpWritable()&&!DP.saving?'':'disabled'}>Marcar los disponibles</button></div>`+list.map(row).join('')+(list.length?'':'<div class="dp-empty">No hay pedidos con estos filtros.</div>')+(outside.length?'<h3>Seleccionados fuera del filtro</h3>'+outside.map(row).join(''):'');
 }
 function dpSummaryHTML(){
-  if(DP.advanced)return dpAdvancedSummaryHTML();
   const s=dpSummary(),orders=dpOrderTotals(DP.draft.paradas),invalid=DP.draft.paradas.some(p=>p.items.some(i=>!Number.isFinite(Number(i.qty))||Number(i.qty)<0||Math.abs(Number(i.qty)-CandyPlanner.round(Number(i.qty)))>0.000001));
   return `<div class="dp-metrics"><div><span>Pedidos seleccionados</span><strong>${orders.length}</strong></div><div><span>Cantidad total</span><strong>${dpQty(s.quantity)}</strong></div><div><span>Peso ${s.missingWeights.length?'conocido':'total'}</span><strong>${dpQty(s.knownKg)} <small>kg</small></strong></div></div>
     <p class="dp-muted">Cantidades en la unidad del pedido (bultos, fundones, etc.). Peso calculado con los kg por bulto del catálogo.</p>
@@ -5357,13 +5355,12 @@ function dpSummaryHTML(){
 }
 function dpRemoveOrder(orderId){if(!dpWritable()||DP.saving)return;DP.draft.paradas=DP.draft.paradas.filter(p=>String(p.orderId)!==orderId);DP.dirty=true;dpRefresh();}
 function dpBody(){
-  const switcher=`<div class="dp-mode"><button class="btn ${DP.advanced?'':'btn-gold'}" onclick="DP.advanced=false;dpRefresh()">Selección rápida</button><button class="btn ${DP.advanced?'btn-gold':''}" onclick="DP.advanced=true;dpRefresh()">Planes guardados y opciones</button></div>`;
-  if(DP.advanced||!DP.data)return switcher+dpAdvancedBody();
+  if(!DP.data)return `<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div></div>${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}<div class="dp-empty">${DP.loading?'Cargando pedidos…':'No se han cargado los datos. <button class="btn" onclick="dpLoad()">Reintentar</button>'}</div>`;
   if(!DP.draft)DP.draft=dpNewDraft();
   const d=DP.draft,busy=DP.saving||DP.documentBusy,opts=(key)=>[...new Set(DP.data.sources.filter(CandyPlanner.selectable).map(s=>s[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  return switcher+`<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div><div class="dp-actions"><button class="btn" onclick="dpLoad()" ${busy||DP.loading?'disabled':''}>${DP.loading?'Actualizando…':'Actualizar pedidos'}</button><button class="btn" onclick="dpNew()" ${busy?'disabled':''}>Nueva selección</button></div></div>
+  return `<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div><div class="dp-actions"><button class="btn" onclick="dpLoad()" ${busy||DP.loading?'disabled':''}>${DP.loading?'Actualizando…':'Actualizar pedidos'}</button><button class="btn" onclick="dpNew()" ${busy?'disabled':''}>Nueva selección</button></div></div>
     ${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}${DP.message?`<div class="dp-alert dp-alert-ok" role="status">${dpEscape(DP.message)}</div>`:''}
-    ${d.id?`<div class="dp-alert">Estás consultando el plan #${d.id}: ${dpEscape(d.nombre)}. ${DP.dirty?'Tienes cambios sin guardar.':''} Puedes gestionarlo en «Planes guardados y opciones».</div>`:''}
+    ${d.id?`<div class="dp-alert">Estás consultando el plan #${d.id}: ${dpEscape(d.nombre)}. ${DP.dirty?'Tienes cambios sin guardar.':''}</div>`:''}
     <div class="dp-layout dp-simple-layout"><section class="dp-panel"><div class="dp-panel-head"><h2>Selecciona los pedidos</h2><p>Puedes ajustar las cantidades de los pedidos por facturar.</p></div><div class="dp-filters">
     <label class="dp-wide">Buscar cliente, pedido, vendedor o producto<input value="${dpEscape(DP.query)}" oninput="dpFilter('query',this.value)" placeholder="Buscar…"></label>
     <label>Ciudad<select onchange="dpFilter('city',this.value)"><option value="">Todas</option>${opts('city').map(x=>`<option value="${dpEscape(x)}" ${DP.city===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
@@ -5405,7 +5402,7 @@ async function dpDocument(){
   if(JSON.stringify(DP.draft)!==original)throw Error('La selección cambió. Vuelve a generar el documento.');
   if(d.id){
     const saved=data.plans.find(p=>p.id===d.id);
-    if(!saved||saved.version!==d.version)throw Error('El plan guardado cambió. Ábrelo de nuevo en Planes guardados.');
+    if(!saved||saved.version!==d.version)throw Error('El plan guardado cambió. Pulsa Nueva selección y vuelve a marcar los pedidos.');
   }
   let issues=CandyPlanner.issues(d,data.sources);
   if((!d.id||CandyPlanner.active(d))&&issues.some(i=>i.changed||i.blocked)){
