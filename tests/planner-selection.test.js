@@ -42,10 +42,12 @@ test('un pedido facturado después de seleccionarlo obliga a revisarlo',async()=
   const {ctx,data,orders}=setup();ctx.dpSelect('P1:pendiente');orders[0].entregas=[{numeroFactura:'F1',estado:'POR_DESPACHAR',items:[{name:'YumYum',qty:10}]}];data.sources=CandyPlanner.sources(orders,[]);
   await assert.rejects(ctx.dpDocument(),/Un pedido cambió/);
 });
-test('las cantidades asignadas a otro plan se descuentan y se revalidan al exportar',async()=>{
+test('los planes anteriores no bloquean selección, pesos, stock ni documentos',async()=>{
   const {ctx,data}=setup();ctx.dpSelect('P1:pendiente');
   const source=data.sources[0];data.plans=[{id:8,estado:'BORRADOR',paradas:[{...source,items:[{name:'YumYum',qty:8}]}]}];
-  await assert.rejects(ctx.dpDocument(),/disponibles para planificar/);
+  assert.equal(ctx.dpCandidates().find(p=>p.key===source.key).items.find(i=>i.name==='YumYum').available,10);
+  const doc=await ctx.dpDocument();assert.equal(doc.s.knownKg,90);assert.equal(doc.s.rows.find(r=>r.name==='YumYum').elsewhere,0);
+  data.plans[0].paradas[0].signature='obsoleto';await ctx.dpDocument();
 });
 test('se rechazan cambios de selección durante la consulta',async()=>{
   const {ctx,dp,data}=setup();ctx.dpSelect('P1:pendiente');let finish;ctx.apiGet=()=>new Promise(resolve=>finish=resolve);
@@ -60,9 +62,11 @@ test('cantidades inválidas fallan y cantidades cero se excluyen del documento',
   const {ctx}=setup();ctx.dpSelect('P1:pendiente');ctx.dpQuantity(0,0,-2);await assert.rejects(ctx.dpDocument(),/Cantidad inválida/);
   ctx.dpQuantity(0,0,0);const doc=await ctx.dpDocument();assert.equal(doc.s.quantity,10);assert.equal(doc.s.knownKg,50);
 });
-test('consulta permite calcular sin guardar pero mantiene planes archivados sin editar',async()=>{
+test('consulta permite calcular sin guardar y borrar vacía la selección sin escribir al servidor',async()=>{
   const {ctx,dp,data}=setup();data.canEdit=false;ctx.dpSelect('P1:pendiente');assert.equal(dp.draft.paradas.length,1);await ctx.dpDocument();
-  dp.draft.id=1;dp.draft.estado='CERRADO';assert.equal(vm.runInContext('dpWritable()',ctx),false);
+  ctx.apiPost=()=>{throw Error('No debe escribir');};ctx.apiPut=ctx.apiPost;
+  dp.city='Quito';ctx.dpNew();assert.equal(dp.draft.paradas.length,0);assert.equal(dp.city,'');assert.equal(ctx.dpSummary().knownKg,0);
+  ctx.dpSelect('P1:pendiente');await ctx.dpDocument();assert.equal(dp.draft.id,undefined);
 });
 test('el HTML conserva sintaxis válida en todos sus scripts',()=>{
   for(const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g))new vm.Script(match[1]);

@@ -5172,7 +5172,7 @@ const dpDate=v=>{const s=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.
 const dpExcelDate=v=>{const day=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(day)?{t:'n',v:(Date.parse(day+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000,z:'dd/mm/yyyy'}:'';};
 const dpQty=n=>Number(n||0).toLocaleString('es-EC',{maximumFractionDigits:2});
 const dpStatus={BORRADOR:'Borrador',PLANIFICADO:'Planificado',CERRADO:'Cerrado',CANCELADO:'Cancelado',POR_FACTURAR:'Por facturar',POR_DESPACHAR:'Listo para despacho',EN_TRANSITO:'En tránsito',ENTREGADO:'Entregado',REVISAR:'Revisar pedido'};
-const dpWritable=()=>!!DP.data&&(!DP.draft?.id||(DP.data.canEdit&&CandyPlanner.active(DP.draft)))&&!DP.documentBusy;
+const dpWritable=()=>!!DP.data&&!DP.documentBusy;
 function dpNewDraft(){return {nombre:'Carga '+dpDate(hoyISO()),fecha_salida:hoyISO(),vehiculo:'',conductor:'',capacidad_kg:'',costo_estimado:'',observaciones:'',estado:'BORRADOR',paradas:[],operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'plan-'+Date.now()+'-'+Math.random().toString(36).slice(2)};}
 function dpRefresh(){if(currentView==='planificador-despachos'){const el=document.getElementById('dpRoot');if(el)el.innerHTML=dpBody();}}
 async function dpLoad(){
@@ -5195,16 +5195,15 @@ function dpDraftChange(field,value){
   dpUpdateWeights();
 }
 function dpDiscardOK(){return !DP.dirty||confirm('Hay cambios sin guardar en esta carga. ¿Quieres descartarlos?');}
-function dpNew(){if(DP.saving||!dpDiscardOK())return;DP.draft=dpNewDraft();DP.dirty=false;DP.error='';DP.message='';dpRefresh();}
-function dpOpen(id){if(DP.saving||!dpDiscardOK())return;const p=DP.data.plans.find(p=>String(p.id)===String(id));if(!p)return;DP.draft=JSON.parse(JSON.stringify(p));DP.draft.fecha_salida=String(p.fecha_salida).slice(0,10);DP.dirty=false;DP.error='';DP.message='';dpRefresh();}
+function dpNew(){if(DP.saving||DP.documentBusy)return;DP.draft=dpNewDraft();DP.dirty=false;DP.error='';DP.message='Selección borrada. Puedes empezar otra.';DP.query='';DP.city='';DP.sector='';DP.until='';DP.kind='';dpRefresh();}
 function dpFilter(field,value){if(!['query','city','sector','until','kind'].includes(field))return;DP[field]=value;const list=document.getElementById('dpCandidates');if(list)list.innerHTML=dpCandidatesHTML();}
-function dpCandidates(){return CandyPlanner.candidates(DP.data?.sources,DP.data?.plans,DP.draft?.id);}
+function dpCandidates(){return CandyPlanner.candidates(DP.data?.sources,[]);}
 function dpSelect(key){
   if(!dpWritable()||DP.saving||DP.draft.paradas.some(s=>s.key===key))return;
   if(DP.draft.paradas.length>=250){DP.error='Puedes seleccionar hasta 250 pedidos o entregas a la vez.';dpRefresh();return;}
   const s=dpCandidates().find(s=>s.key===key);if(!s||s.blocked)return;
   const items=s.items.filter(i=>i.available>0).map(i=>({name:i.name,qty:i.available}));
-  if(!items.length){DP.error='Estas cantidades ya están asignadas a otros planes abiertos.';dpRefresh();return;}
+  if(!items.length){DP.error='Este pedido no tiene cantidades pendientes disponibles.';dpRefresh();return;}
   DP.draft.paradas.push({...s,items});DP.dirty=true;DP.message='';DP.error='';dpRefresh();
 }
 function dpRemove(index){if(!dpWritable()||DP.saving)return;DP.draft.paradas.splice(index,1);DP.dirty=true;DP.message='';dpRefresh();}
@@ -5217,80 +5216,7 @@ function dpQuantity(stopIndex,itemIndex,value){
   const label=document.getElementById('dpSaveState');if(label)label.textContent='Cambios sin guardar';
   dpUpdateWeights();
 }
-function dpSummary(){return CandyPlanner.summarize(DP.draft?.paradas,DP.data?.catalog,DP.data?.inventory,DP.data?.plans,DP.draft?.id,DP.data?.sources);}
-function dpAdvancedSummaryHTML(){
-  const s=dpSummary(),cap=Number(DP.draft.capacidad_kg)||0,missing=s.missingWeights.length,over=cap>0&&s.knownKg>cap,pct=cap>0?Math.round(s.knownKg/cap*100):0;
-  const invalid=DP.draft.paradas.some(p=>p.items.some(i=>!Number.isFinite(Number(i.qty))||Number(i.qty)<0));
-  return `<div class="dp-metrics"><div><span>Peso ${missing?'conocido':'planificado'}</span><strong>${dpQty(s.knownKg)} <small>kg</small></strong></div><div><span>Capacidad</span><strong>${cap?dpQty(cap):'—'} <small>kg</small></strong></div><div><span>${over?'Exceso':'Capacidad restante'}</span><strong class="${over?'dp-red':''}">${cap?dpQty(Math.abs(cap-s.knownKg)):'—'} <small>kg${missing?' *':''}</small></strong></div></div>
-    <div class="dp-meter" role="progressbar" aria-label="Capacidad utilizada" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100,Math.max(0,pct))}"><span style="width:${Math.min(100,Math.max(0,pct))}%;background:${over?'#b42318':'#b83e28'}"></span></div>
-    <div class="dp-muted">${cap?pct+' % de la capacidad indicada':'Indica la capacidad útil del vehículo en kg.'}${missing?' · Cálculo incompleto: faltan pesos.':''}</div>
-    ${invalid?'<div class="dp-alert dp-alert-bad">Revisa las cantidades: deben ser números positivos.</div>':''}
-    ${missing?`<div class="dp-alert">Falta peso por bulto: ${s.missingWeights.map(dpEscape).join(', ')}. Puedes guardar un borrador y completar el catálogo antes de confirmar.</div>`:''}
-    ${over?'<div class="dp-alert dp-alert-bad">La carga supera la capacidad. Ajusta las cantidades o el vehículo antes de confirmar.</div>':''}
-    ${s.shortages.length?`<div class="dp-alert"><b>Faltantes para preparar esta carga:</b> ${s.shortages.map(r=>dpEscape(r.name)+' ('+dpQty(r.shortage)+')').join(' · ')}.</div>`:''}
-    <div class="dp-table-scroll"><table class="dp-table"><thead><tr><th>Producto</th><th>Carga</th><th>Stock físico</th><th>Otros planes</th><th>Faltante</th></tr></thead><tbody>${s.rows.map(r=>`<tr><td>${dpEscape(r.name)}</td><td>${dpQty(r.qty)}</td><td>${dpQty(r.stock)}</td><td>${dpQty(r.elsewhere)}</td><td class="${r.shortage?'dp-red':''}">${dpQty(r.shortage)}</td></tr>`).join('')||'<tr><td colspan="5">Selecciona pedidos para calcular la carga.</td></tr>'}</tbody></table></div>
-    <p class="dp-muted">Cantidades en la unidad registrada en cada pedido. El peso utiliza kg por bulto del catálogo. «Otros planes» es demanda planificada, no una reserva física de inventario.</p>`;
-}
-function dpAdvancedCandidatesHTML(){
-  if(!DP.data)return '';
-  let list=dpCandidates();
-  const q=DP.query.trim().toLocaleLowerCase('es');
-  list=list.filter(s=>(!q||[s.client,s.orderId,s.vendor,s.address].some(v=>String(v).toLocaleLowerCase('es').includes(q)))&&(!DP.city||s.city===DP.city)&&(!DP.sector||s.sector===DP.sector)&&(!DP.until||(s.dueDate&&s.dueDate<=DP.until))&&(!DP.kind||s.status===DP.kind));
-  list.sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')||a.client.localeCompare(b.client,'es'));
-  return `<div class="dp-muted dp-list-count">${list.length} pedidos / entregas · ordenados por fecha comprometida</div>`+list.map(s=>{
-    const selected=DP.draft.paradas.some(p=>p.key===s.key),available=s.items.some(i=>i.available>0),canAdd=available&&!s.blocked&&dpWritable()&&!DP.saving&&!selected;
-    return `<article class="dp-candidate ${selected?'dp-selected':''}"><div class="dp-row"><div><strong>${dpEscape(s.client)}</strong><div class="dp-muted">${dpEscape(s.orderId)}${s.invoice?' · Factura '+dpEscape(s.invoice):''}</div></div><span class="dp-pill ${s.kind==='pendiente'?'dp-pill-amber':'dp-pill-blue'}">${dpStatus[s.status]}</span></div>
-      <div class="dp-location">${dpEscape(s.city||'Sin ciudad')} ${s.sector?'· '+dpEscape(s.sector):''} <span>Entrega: ${dpDate(s.dueDate)}</span></div>
-      <div class="dp-muted">${dpEscape(s.address||'Sin dirección de entrega')}</div>
-      <div class="dp-products">${s.items.map(i=>`<div><span>${dpEscape(i.name)}</span><b>${dpQty(i.available)}</b></div>`).join('')}</div>
-      ${s.blocked?`<p class="dp-red">${dpEscape(s.blocked)}</p>`:''}
-      <div class="dp-row"><span class="dp-muted">${dpEscape(s.vendor)}${!available?' · Ya asignado a otro plan':''}</span><button class="btn btn-sm ${selected?'':'btn-gold'}" ${canAdd?'':'disabled'} data-dp-key="${dpEscape(s.key)}" onclick="dpSelect(this.dataset.dpKey)">${selected?'✓ En esta carga':'Añadir a carga'}</button></div></article>`;
-  }).join('')+(list.length?'':'<div class="dp-empty">No hay pedidos que coincidan con los filtros.</div>');
-}
-function dpStopsHTML(){
-  const draft=DP.draft,issues=CandyPlanner.issues(draft,DP.data.sources),editable=dpWritable()&&!DP.saving;
-  return draft.paradas.map((s,i)=>{
-    const info=issues.find(x=>x.key===s.key),now=dpCandidates().find(c=>c.key===s.key);
-    return `<article class="dp-stop"><div class="dp-row"><div><span class="dp-stop-num">${i+1}</span><b>${dpEscape(s.client)}</b></div><div class="dp-actions"><button class="btn btn-sm" aria-label="Subir parada ${i+1}" onclick="dpMove(${i},-1)" ${editable&&i>0?'':'disabled'}>↑</button><button class="btn btn-sm" aria-label="Bajar parada ${i+1}" onclick="dpMove(${i},1)" ${editable&&i<draft.paradas.length-1?'':'disabled'}>↓</button><button class="btn btn-sm" aria-label="Quitar parada ${i+1}" onclick="dpRemove(${i})" ${editable?'':'disabled'}>Quitar</button></div></div>
-      <div class="dp-muted">${dpEscape(s.orderId)} · ${dpEscape(s.city)} · ${dpDate(s.dueDate)}${s.invoice?' · Factura '+dpEscape(s.invoice):''}</div>
-      <div class="dp-muted">${dpEscape(s.address||'Sin dirección')}</div>
-      <span class="dp-pill ${['ENTREGADO','EN_TRANSITO'].includes(info?.status)?'dp-pill-blue':'dp-pill-amber'}">${dpStatus[info?.status]||'Revisar'}</span>
-      ${info?.changed?'<div class="dp-alert">El pedido cambió desde que se guardó el plan. Revisa cantidades y dirección; vuelve a guardar. Si ya fue facturado, quita esta selección y añade su factura.</div>':''}
-      ${info?.blocked?`<div class="dp-alert dp-alert-bad">${dpEscape(info.blocked)}</div>`:''}
-      ${s.items.map((it,j)=>{const max=now?.items.find(p=>p.name===it.name)?.available;return `<div class="dp-qty-row"><label for="dpq-${i}-${j}">${dpEscape(it.name)}${max!=null?`<small>Disponible para este plan: ${dpQty(max)}</small>`:''}</label><input id="dpq-${i}-${j}" type="number" min="0" step="0.01" ${max!=null?'max="'+max+'"':''} value="${dpEscape(it.qty)}" ${editable&&s.kind==='pendiente'?'':'disabled'} oninput="dpQuantity(${i},${j},this.value)"></div>`;}).join('')}
-      <div class="dp-muted">${s.kind==='pendiente'?'Puedes ajustar cantidades; un valor de 0 excluye ese producto al guardar.':'La entrega facturada se incluye completa.'}</div></article>`;
-  }).join('')||'<div class="dp-empty"><b>Arma tu próxima carga</b><p>Añade pedidos de la lista. Aquí podrás ajustar cantidades y ordenar las paradas.</p></div>';
-}
-function dpAdvancedBody(){
-  const head=`<div class="dp-header"><div><h1>Planificador de despachos</h1><p>Organiza pedidos, revisa la carga y prepara las entregas.</p></div><button class="btn" onclick="dpLoad()" ${DP.loading||DP.saving?'disabled':''}>${DP.loading?'Actualizando…':'↻ Actualizar datos'}</button></div>`;
-  const error=DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:'';
-  if(!DP.data)return head+error+'<div class="dp-empty">'+(DP.loading?'Cargando pedidos, inventario y planes…':'No se han cargado los datos. Pulsa Actualizar datos para reintentar.')+'</div>';
-  if(!DP.draft)DP.draft=dpNewDraft();
-  const d=DP.draft,edit=dpWritable()&&!DP.saving,disabled=edit?'':'disabled';
-  const cities=[...new Set(DP.data.sources.filter(CandyPlanner.selectable).map(s=>s.city).filter(Boolean))].sort();
-  const sectors=[...new Set(DP.data.sources.filter(CandyPlanner.selectable).map(s=>s.sector).filter(Boolean))].sort();
-  const plans=DP.data.plans.filter(p=>DP.archive?!CandyPlanner.active(p):CandyPlanner.active(p)).slice().sort((a,b)=>String(a.fecha_salida).localeCompare(String(b.fecha_salida)));
-  const fields=[['nombre','Nombre de la carga','text',120],['fecha_salida','Fecha de salida','date'],['vehiculo','Vehículo / placa','text',160],['conductor','Conductor / transportista','text',160],['capacidad_kg','Capacidad útil (kg)','number'],['costo_estimado','Transporte estimado ($)','number']];
-  return head+error+(DP.message?`<div class="dp-alert dp-alert-ok" role="status">${dpEscape(DP.message)}</div>`:'')+
-    `<div class="dp-note">Guardar un plan organiza cantidades. Bodega registra la salida física en el flujo de despacho habitual. La confirmación del plan no exige factura ni stock completo: revisa los avisos antes de preparar la carga.</div>
-    <section class="dp-plans"><div class="dp-row"><h2>${DP.archive?'Planes archivados (últimos 50)':'Planes abiertos'}</h2><div class="dp-actions"><button class="btn btn-sm" onclick="DP.archive=!DP.archive;dpRefresh()">${DP.archive?'Ver abiertos':'Ver archivados'}</button>${DP.data.canEdit?`<button class="btn btn-gold btn-sm" onclick="dpNew()" ${DP.saving?'disabled':''}>＋ Nuevo plan</button>`:''}</div></div>
-      <div class="dp-plan-list">${plans.map(p=>`<button class="dp-plan ${String(d.id)===String(p.id)?'active':''}" onclick="dpOpen(${p.id})" ${DP.saving?'disabled':''}><b>${dpEscape(p.nombre)}</b><span>${dpDate(p.fecha_salida)} · ${dpEscape(p.vehiculo||'Sin vehículo')}</span><span>${dpStatus[p.estado]} · ${p.paradas.length} selecciones · #${p.id}${CandyPlanner.active(p)&&CandyPlanner.issues(p,DP.data.sources).some(x=>x.changed||x.blocked)?' · REVISAR':''}</span></button>`).join('')||'<span class="dp-muted">No hay planes en esta sección.</span>'}</div></section>
-    ${!DP.data.canEdit?'<div class="dp-alert">Tu acceso es de consulta. Gerencia, Facturación y Bodega pueden guardar planes.</div>':''}
-    <div class="dp-layout"><section class="dp-panel"><div class="dp-panel-head"><h2>1. Pedidos disponibles</h2><p>Incluye cantidades por facturar y entregas facturadas que aún no salen.</p></div>
-      <div class="dp-filters"><label class="dp-wide">Buscar cliente, pedido o vendedor<input value="${dpEscape(DP.query)}" placeholder="Escribe para buscar…" oninput="dpFilter('query',this.value)"></label>
-      <label>Ciudad<select onchange="dpFilter('city',this.value)"><option value="">Todas las ciudades</option>${cities.map(x=>`<option ${DP.city===x?'selected':''} value="${dpEscape(x)}">${dpEscape(x)}</option>`).join('')}</select></label>
-      <label>Sector<select onchange="dpFilter('sector',this.value)"><option value="">Todos los sectores</option>${sectors.map(x=>`<option ${DP.sector===x?'selected':''} value="${dpEscape(x)}">${dpEscape(x)}</option>`).join('')}</select></label>
-      <label>Entrega hasta<input type="date" value="${dpEscape(DP.until)}" onchange="dpFilter('until',this.value)"></label>
-      <label>Estado<select onchange="dpFilter('kind',this.value)"><option value="">Todos</option><option value="POR_FACTURAR" ${DP.kind==='POR_FACTURAR'?'selected':''}>Por facturar</option><option value="POR_DESPACHAR" ${DP.kind==='POR_DESPACHAR'?'selected':''}>Listo para despacho</option></select></label></div>
-      <div id="dpCandidates" class="dp-candidates">${dpCandidatesHTML()}</div></section>
-      <section class="dp-panel"><div class="dp-panel-head"><div class="dp-row"><h2>2. Tu carga ${d.id?'#'+d.id:''}</h2><span class="dp-pill">${dpStatus[d.estado]}</span></div><p id="dpSaveState">${DP.dirty?'Cambios sin guardar':d.id?'Guardado · '+dpEscape(d.updated_by_name||''):'Nuevo borrador'}</p></div>
-      <fieldset class="dp-form" ${disabled}>${fields.map(([key,label,type,max])=>`<label>${label}<input type="${type}" value="${dpEscape(d[key])}" ${max?'maxlength="'+max+'"':''} ${type==='number'?'min="0" step="0.01"':''} oninput="dpDraftChange('${key}',this.value)"></label>`).join('')}<label class="dp-wide">Observaciones<textarea maxlength="2000" oninput="dpDraftChange('observaciones',this.value)">${dpEscape(d.observaciones)}</textarea></label></fieldset>
-      <div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div><h3>Orden de preparación y paradas</h3>${dpStopsHTML()}</div>
-      <div class="dp-footer">${DP.data.canEdit&&(!d.id||CandyPlanner.active(d))?`<button class="btn" onclick="dpSave('BORRADOR')" ${DP.saving?'disabled':''}>${DP.saving?'Guardando…':'Guardar borrador'}</button><button class="btn btn-gold" onclick="dpSave('PLANIFICADO')" ${DP.saving?'disabled':''}>Confirmar plan</button>`:''}
-      <button class="btn" onclick="dpExport()" ${d.paradas.length?'':'disabled'}>⇩ Excel de carga</button><button class="btn" onclick="dpPrint()" ${d.paradas.length?'':'disabled'}>Imprimir hoja de ruta</button>
-      ${d.id&&CandyPlanner.active(d)&&DP.data.canEdit?`<button class="btn btn-ghost" onclick="dpArchive('CERRADO')" ${DP.saving?'disabled':''}>Cerrar plan</button><button class="btn btn-ghost" onclick="dpArchive('CANCELADO')" ${DP.saving?'disabled':''}>Cancelar plan</button>`:''}</div>
-      <div class="dp-muted dp-updated">Datos consultados: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}. ${d.id?'Cerrar o cancelar libera las cantidades asignadas; no modifica pedidos ni inventario.':''}</div></section></div>`;
-}
+function dpSummary(){return CandyPlanner.summarize(DP.draft?.paradas,DP.data?.catalog,DP.data?.inventory,[],null,DP.data?.sources);}
 /* Selección rápida: utiliza las mismas reglas de disponibilidad del servidor. */
 function dpWeightOf(stops){return CandyPlanner.summarize(stops,DP.data?.catalog,[],[],null,[]);}
 function dpOrderTotals(stops){
@@ -5337,7 +5263,7 @@ function dpCandidatesHTML(){
     ${s.blocked?`<p class="dp-alert dp-alert-bad">${dpEscape(s.blocked)}</p>`:''}
     ${info?.changed?'<p class="dp-alert dp-alert-bad">Este pedido cambió. Desmárcalo y vuelve a seleccionarlo con sus datos actuales.</p>':''}
     ${selected&&stop.kind!=='pendiente'?'<p class="dp-muted">La entrega facturada se incluye completa.</p>':''}
-    ${!selected&&!s.items.some(i=>i.available>0)?'<p class="dp-muted">Cantidad asignada previamente a un plan.</p>':''}</article>`;
+    ${!selected&&!s.items.some(i=>i.available>0)?'<p class="dp-muted">Sin cantidades pendientes.</p>':''}</article>`;
   };
   return `<div class="dp-row dp-list-count"><span>${list.length} pedidos / entregas encontrados</span><button class="btn btn-sm" onclick="dpSelectVisible()" ${dpWritable()&&!DP.saving?'':'disabled'}>Marcar los disponibles</button></div>`+list.map(row).join('')+(list.length?'':'<div class="dp-empty">No hay pedidos con estos filtros.</div>')+(outside.length?'<h3>Seleccionados fuera del filtro</h3>'+outside.map(row).join(''):'');
 }
@@ -5351,68 +5277,37 @@ function dpSummaryHTML(){
     <h3>Peso por pedido</h3><div class="dp-table-scroll"><table class="dp-table"><thead><tr><th>Pedido / cliente</th><th>Cantidad</th><th>Peso kg</th><th></th></tr></thead><tbody>${orders.map(o=>`<tr><td><b>${dpEscape(o.orderId)}</b><br>${dpEscape(o.client)}</td><td>${dpQty(o.quantity)}</td><td>${dpQty(o.knownKg)}${o.missingWeights.length?' *':''}</td><td><button class="btn btn-sm" data-order="${dpEscape(o.orderId)}" onclick="dpRemoveOrder(this.dataset.order)" ${dpWritable()&&!DP.saving?'':'disabled'} aria-label="Quitar ${dpEscape(o.orderId)}">Quitar</button></td></tr>`).join('')||'<tr><td colspan="4">Sin pedidos seleccionados.</td></tr>'}</tbody></table></div>
     ${s.missingWeights.length?'<p class="dp-muted">* Peso incompleto.</p>':''}
     ${s.shortages.length?`<div class="dp-alert">Faltantes previstos: ${s.shortages.map(r=>dpEscape(r.name)+' ('+dpQty(r.shortage)+')').join(' · ')}.</div>`:''}
-    <details><summary>Ver stock y cantidades en otros planes</summary><div class="dp-table-scroll"><table class="dp-table"><thead><tr><th>Producto</th><th>Stock físico</th><th>Otros planes</th><th>Faltante</th></tr></thead><tbody>${s.rows.map(r=>`<tr><td>${dpEscape(r.name)}</td><td>${dpQty(r.stock)}</td><td>${dpQty(r.elsewhere)}</td><td>${dpQty(r.shortage)}</td></tr>`).join('')}</tbody></table></div><p class="dp-muted">Otros planes es demanda planificada, no una reserva física. Verifica el stock antes de cargar.</p></details>`;
+    <details><summary>Ver stock disponible</summary><div class="dp-table-scroll"><table class="dp-table"><thead><tr><th>Producto</th><th>Stock físico</th><th>Faltante</th></tr></thead><tbody>${s.rows.map(r=>`<tr><td>${dpEscape(r.name)}</td><td>${dpQty(r.stock)}</td><td>${dpQty(r.shortage)}</td></tr>`).join('')}</tbody></table></div><p class="dp-muted">Verifica el stock físico antes de cargar.</p></details>`;
 }
 function dpRemoveOrder(orderId){if(!dpWritable()||DP.saving)return;DP.draft.paradas=DP.draft.paradas.filter(p=>String(p.orderId)!==orderId);DP.dirty=true;dpRefresh();}
 function dpBody(){
   if(!DP.data)return `<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div></div>${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}<div class="dp-empty">${DP.loading?'Cargando pedidos…':'No se han cargado los datos. <button class="btn" onclick="dpLoad()">Reintentar</button>'}</div>`;
   if(!DP.draft)DP.draft=dpNewDraft();
   const d=DP.draft,busy=DP.saving||DP.documentBusy,opts=(key)=>[...new Set(DP.data.sources.filter(CandyPlanner.selectable).map(s=>s[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  return `<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div><div class="dp-actions"><button class="btn" onclick="dpLoad()" ${busy||DP.loading?'disabled':''}>${DP.loading?'Actualizando…':'Actualizar pedidos'}</button><button class="btn" onclick="dpNew()" ${busy?'disabled':''}>Nueva selección</button></div></div>
+  return `<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div><div class="dp-actions"><button class="btn" onclick="dpLoad()" ${busy||DP.loading?'disabled':''}>${DP.loading?'Actualizando…':'Actualizar pedidos'}</button><button class="btn" onclick="dpNew()" ${busy?'disabled':''}>Borrar selección</button></div></div>
     ${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}${DP.message?`<div class="dp-alert dp-alert-ok" role="status">${dpEscape(DP.message)}</div>`:''}
-    ${d.id?`<div class="dp-alert">Estás consultando el plan #${d.id}: ${dpEscape(d.nombre)}. ${DP.dirty?'Tienes cambios sin guardar.':''}</div>`:''}
     <div class="dp-layout dp-simple-layout"><section class="dp-panel"><div class="dp-panel-head"><h2>Selecciona los pedidos</h2><p>Puedes ajustar las cantidades de los pedidos por facturar.</p></div><div class="dp-filters">
     <label class="dp-wide">Buscar cliente, pedido, vendedor o producto<input value="${dpEscape(DP.query)}" oninput="dpFilter('query',this.value)" placeholder="Buscar…"></label>
     <label>Ciudad<select onchange="dpFilter('city',this.value)"><option value="">Todas</option>${opts('city').map(x=>`<option value="${dpEscape(x)}" ${DP.city===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
     <label>Sector<select onchange="dpFilter('sector',this.value)"><option value="">Todos</option>${opts('sector').map(x=>`<option value="${dpEscape(x)}" ${DP.sector===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
     <label>Entrega hasta<input type="date" value="${dpEscape(DP.until)}" onchange="dpFilter('until',this.value)"></label><label>Estado<select onchange="dpFilter('kind',this.value)"><option value="">Todos</option><option value="POR_FACTURAR" ${DP.kind==='POR_FACTURAR'?'selected':''}>Por facturar</option><option value="POR_DESPACHAR" ${DP.kind==='POR_DESPACHAR'?'selected':''}>Listo para despacho</option></select></label></div><div id="dpCandidates" class="dp-candidates">${dpCandidatesHTML()}</div></section>
-    <section class="dp-panel dp-simple-summary"><div class="dp-panel-head"><h2>Tu selección, en tiempo real</h2><p>Las cantidades de un mismo producto se suman automáticamente.</p></div><div class="dp-footer"><button class="btn btn-gold" onclick="dpExport()" ${d.paradas.length&&!busy?'':'disabled'}>Descargar Excel</button><button class="btn" onclick="dpPrint()" ${d.paradas.length&&!busy?'':'disabled'}>Hoja de ruta / PDF</button></div><div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div></div><p class="dp-muted dp-updated">Puedes descargar sin guardar un plan. La selección no cambia el stock ni el estado de los pedidos.<br>Datos consultados: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}</p></section></div>`;
+    <section class="dp-panel dp-simple-summary"><div class="dp-panel-head"><h2>Tu selección, en tiempo real</h2><p>Las cantidades de un mismo producto se suman automáticamente.</p></div><div class="dp-footer"><button class="btn btn-gold" onclick="dpExport()" ${d.paradas.length&&!busy?'':'disabled'}>Descargar Excel</button><button class="btn" onclick="dpPrint()" ${d.paradas.length&&!busy?'':'disabled'}>Hoja de ruta / PDF</button></div><div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div></div><p class="dp-muted dp-updated">Selección temporal: descarga tus documentos y pulsa Borrar selección para empezar otra. No cambia pedidos ni inventario.<br>Datos consultados: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}</p></section></div>`;
 }
 
-async function dpSave(state){
-  if(DP.saving||DP.loading||!DP.data.canEdit||!dpWritable())return;
-  DP.error='';DP.message='';
-  const payload=JSON.parse(JSON.stringify(DP.draft));payload.estado=state;
-  payload.paradas=payload.paradas.map(s=>({...s,items:s.items.filter(i=>Number(i.qty)!==0)})).filter(s=>s.items.length);
-  try{CandyPlanner.validateStops(payload.paradas,DP.data.sources,DP.data.plans,payload.id);}catch(e){DP.error=e.message;dpRefresh();return;}
-  DP.saving=true;dpRefresh();
-  try{
-    const saved=payload.id?await apiPut('/api/dispatch-plans/'+payload.id,payload):await apiPost('/api/dispatch-plans',payload);
-    DP.draft={...saved,fecha_salida:String(saved.fecha_salida).slice(0,10)};DP.dirty=false;
-    DP.data.plans=DP.data.plans.filter(p=>p.id!==saved.id);DP.data.plans.push(saved);
-    DP.message=state==='PLANIFICADO'?'Plan confirmado. Revisa facturación y faltantes antes de preparar la carga.':'Borrador guardado para el equipo.';
-    try{DP.data=await apiGet('/api/dispatch-planner');}catch(e){DP.message+=' Los datos de inventario no pudieron actualizarse; pulsa Actualizar datos.';}
-  }catch(e){DP.error=e.message;}finally{DP.saving=false;dpRefresh();}
-}
-async function dpArchive(state){
-  if(DP.saving||!DP.draft?.id||!dpWritable())return;
-  if(DP.dirty){DP.error='Guarda o descarta los cambios antes de cerrar o cancelar el plan.';dpRefresh();return;}
-  if(!confirm((state==='CERRADO'?'¿Cerrar':'¿Cancelar')+' este plan? Se liberan sus cantidades planificadas. Los pedidos y el inventario conservan su estado.'))return;
-  DP.saving=true;DP.error='';dpRefresh();
-  try{
-    const p=await apiPost('/api/dispatch-plans/'+DP.draft.id+'/status',{estado:state,version:DP.draft.version});
-    DP.draft={...p,fecha_salida:String(p.fecha_salida).slice(0,10)};
-    DP.data.plans=DP.data.plans.filter(x=>x.id!==p.id);DP.data.plans.push(p);DP.archive=true;DP.message='Plan '+(state==='CERRADO'?'cerrado.':'cancelado.');
-  }catch(e){DP.error=e.message;}finally{DP.saving=false;dpRefresh();}
-}
 async function dpDocument(){
   if(!DP.draft?.paradas.length)throw Error('Marca al menos un pedido.');
   const original=JSON.stringify(DP.draft), d=JSON.parse(original);
   const data=await apiGet('/api/dispatch-planner');
   if(JSON.stringify(DP.draft)!==original)throw Error('La selección cambió. Vuelve a generar el documento.');
-  if(d.id){
-    const saved=data.plans.find(p=>p.id===d.id);
-    if(!saved||saved.version!==d.version)throw Error('El plan guardado cambió. Pulsa Nueva selección y vuelve a marcar los pedidos.');
-  }
   let issues=CandyPlanner.issues(d,data.sources);
-  if((!d.id||CandyPlanner.active(d))&&issues.some(i=>i.changed||i.blocked)){
+  if(issues.some(i=>i.changed||i.blocked)){
     DP.data=data;
     throw Error('Un pedido cambió. Revisa los avisos, desmarca ese pedido y vuelve a seleccionarlo antes de descargar.');
   }
   d.paradas=d.paradas.map(p=>({...p,items:p.items.filter(i=>Number(i.qty)!==0)})).filter(p=>p.items.length);
-  if(!d.id||CandyPlanner.active(d))d.paradas=CandyPlanner.validateStops(d.paradas,data.sources,data.plans,d.id);
+  d.paradas=CandyPlanner.validateStops(d.paradas,data.sources,[]);
   DP.data=data;
-  return {d,s:CandyPlanner.summarize(d.paradas,data.catalog,data.inventory,data.plans,d.id,data.sources),issues:CandyPlanner.issues(d,data.sources)};
+  return {d,s:CandyPlanner.summarize(d.paradas,data.catalog,data.inventory,[],null,data.sources),issues:CandyPlanner.issues(d,data.sources)};
 }
 function dpDocumentError(e){
   DP.error=e.message||'No se pudo generar el documento.';dpRefresh();
@@ -5438,8 +5333,8 @@ async function dpExport(){
     d.paradas.forEach((p,i)=>p.items.forEach(it=>{const r=s.rows.find(r=>r.name===it.name),n=detail.length+1;detail.push([i+1,p.orderId,p.invoice||'',p.client,p.city,p.sector,p.address,dpExcelDate(p.dueDate),dpStatus[issues.find(x=>x.key===p.key)?.status]||'Revisar',it.name,Number(it.qty),r?.weight??null,{t:r?.weight?'n':'s',v:r?.weight?CandyPlanner.round(Number(it.qty)*r.weight):'',f:`IF(L${n}>0,K${n}*L${n},"")`},'']);}));
     const ws=XLSX.utils.aoa_to_sheet(detail);ws['!cols']=[8,22,24,30,20,20,44,18,24,35,14,22,18,28].map(wch=>({wch}));ws['!autofilter']={ref:ws['!ref']};
     XLSX.utils.book_append_sheet(wb,ws,'Hoja de ruta');
-    const prep=XLSX.utils.aoa_to_sheet([['Producto','Cantidad a preparar','Stock consultado','Otros planes','Faltante previsto','Peso por bulto (kg)'],...s.rows.map(r=>[r.name,r.qty,r.stock,r.elsewhere,r.shortage,r.weight])]);prep['!cols']=[38,23,22,22,22,25].map(wch=>({wch}));XLSX.utils.book_append_sheet(wb,prep,'Preparación');
-    const info=XLSX.utils.aoa_to_sheet([['CANDYTEC · PLAN DE CARGA',''],['Plan',d.nombre],['Estado',dpStatus[d.estado]],['Salida',dpExcelDate(d.fecha_salida)],['Vehículo',d.vehiculo],['Conductor',d.conductor],['Capacidad kg',Number(d.capacidad_kg)],['Peso conocido kg',s.knownKg],['Pesos faltantes',s.missingWeights.join(', ')],['Transporte estimado USD',Number(d.costo_estimado)],['Observaciones',d.observaciones],['Datos consultados',new Date(DP.data.asOf).toLocaleString('es-EC')],['Uso','Planificación y preparación. Registra la salida física y la entrega en el sistema.'],['Stock','Instantánea orientativa; confirmar disponibilidad física en Bodega.']]);info['!cols']=[28,105].map(wch=>({wch}));XLSX.utils.book_append_sheet(wb,info,'Carga');
+    const prep=XLSX.utils.aoa_to_sheet([['Producto','Cantidad a preparar','Stock consultado','Faltante previsto','Peso por bulto (kg)'],...s.rows.map(r=>[r.name,r.qty,r.stock,r.shortage,r.weight])]);prep['!cols']=[38,23,22,22,22,25].map(wch=>({wch}));XLSX.utils.book_append_sheet(wb,prep,'Preparación');
+    const info=XLSX.utils.aoa_to_sheet([['CANDYTEC · SELECCIÓN DE CARGA',''],['Selección',d.nombre],['Salida',dpExcelDate(d.fecha_salida)],['Vehículo',d.vehiculo],['Conductor',d.conductor],['Capacidad kg',Number(d.capacidad_kg)],['Peso conocido kg',s.knownKg],['Pesos faltantes',s.missingWeights.join(', ')],['Transporte estimado USD',Number(d.costo_estimado)],['Observaciones',d.observaciones],['Datos consultados',new Date(DP.data.asOf).toLocaleString('es-EC')],['Uso','Planificación y preparación. Registra la salida física y la entrega en el sistema.'],['Stock','Instantánea orientativa; confirmar disponibilidad física en Bodega.']]);info['!cols']=[28,105].map(wch=>({wch}));XLSX.utils.book_append_sheet(wb,info,'Carga');
     const orders=dpOrderTotals(d.paradas);
     const orderSheet=XLSX.utils.aoa_to_sheet([['Pedido','Cliente','Ciudad','Cantidad (unidad del pedido)','Peso conocido (kg)','Cálculo'],...orders.map(o=>[o.orderId,o.client,o.city,o.quantity,o.knownKg,o.missingWeights.length?'INCOMPLETO: '+o.missingWeights.join(', '):'Completo'])]);
     orderSheet['!cols']=[24,36,22,30,23,50].map(wch=>({wch}));XLSX.utils.book_append_sheet(wb,orderSheet,'Por pedido');
@@ -5464,11 +5359,11 @@ async function dpPrint(){
     const frame=document.createElement('iframe');frame.title='Hoja de ruta para impresión';frame.style.cssText='display:block;width:100%;height:65vh;border:1px solid #ddd;margin-top:12px;background:white';
     frame.onload=()=>{print.disabled=false;print.textContent='Imprimir / Guardar PDF';};
     print.onclick=()=>{try{frame.contentWindow.focus();frame.contentWindow.print();}catch(e){hint.textContent='No se pudo abrir la impresión: '+e.message;}};
-    frame.srcdoc=`<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>CandyTec · Carga ${d.id||'selección'}</title><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;font-size:11px;color:#222}h1{font-size:21px}h2{font-size:15px}table{border-collapse:collapse;width:100%;margin:12px 0;table-layout:fixed}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}.muted{color:#555}.sign{height:36px}th{background:#eee}</style></head><body><h1>CandyTec · Hoja de ruta y preparación</h1><p><b>${dpEscape(d.nombre)}</b> · ${d.id?'#'+d.id:'Selección sin guardar'} · ${dpStatus[d.estado]} · Salida ${dpDate(d.fecha_salida)}</p><p>Vehículo: ${dpEscape(d.vehiculo||'Pendiente')} · Conductor: ${dpEscape(d.conductor||'Pendiente')} · Peso ${s.missingWeights.length?'conocido':'planificado'}: ${dpQty(s.knownKg)} kg · Capacidad: ${dpQty(d.capacidad_kg)} kg</p>${s.missingWeights.length?'<p><b>ATENCIÓN: faltan pesos por bulto. Peso total incompleto.</b></p>':''}<p>${dpEscape(d.observaciones)}</p><table><thead><tr><th style="width:4%">N.º</th><th style="width:20%">Cliente / pedido</th><th style="width:23%">Destino</th><th style="width:32%">Productos y cantidades</th><th>Recepción / firma</th></tr></thead><tbody>${d.paradas.map((p,i)=>`<tr><td>${i+1}</td><td><b>${dpEscape(p.client)}</b><br>${dpEscape(p.orderId)}<br>${p.invoice?'Factura '+dpEscape(p.invoice):'POR FACTURAR'}<br>${dpStatus[issues.find(x=>x.key===p.key)?.status]||'Revisar'}</td><td>${dpEscape(p.city)} · ${dpEscape(p.sector)}<br>${dpEscape(p.address)}<br>Prevista: ${dpDate(p.dueDate)}</td><td>${p.items.map(it=>dpEscape(it.name)+' — <b>'+dpQty(it.qty)+'</b>').join('<br>')}<br><b>Peso: ${dpWeightLabel(dpWeightOf([p]))}</b></td><td class="sign"></td></tr>`).join('')}</tbody></table><h2>Totales por pedido</h2><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Cantidad</th><th>Peso</th></tr></thead><tbody>${dpOrderTotals(d.paradas).map(o=>`<tr><td>${dpEscape(o.orderId)}</td><td>${dpEscape(o.client)}</td><td>${dpQty(o.quantity)}</td><td>${dpWeightLabel(o)}</td></tr>`).join('')}</tbody></table><h2>Lista de preparación por producto</h2><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Stock consultado</th><th>Otros planes</th><th>Faltante previsto</th></tr></thead><tbody>${s.rows.map(r=>`<tr><td>${dpEscape(r.name)}</td><td>${dpQty(r.qty)}</td><td>${dpQty(r.stock)}</td><td>${dpQty(r.elsewhere)}</td><td>${dpQty(r.shortage)}</td></tr>`).join('')}</tbody></table><p class="muted">Datos consultados: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}. Documento de planificación; confirmar facturación, disponibilidad y dirección antes de cargar. Registra la salida física y la entrega en el sistema.</p></body></html>`;
+    frame.srcdoc=`<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>CandyTec · Carga ${d.id||'selección'}</title><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;font-size:11px;color:#222}h1{font-size:21px}h2{font-size:15px}table{border-collapse:collapse;width:100%;margin:12px 0;table-layout:fixed}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}.muted{color:#555}.sign{height:36px}th{background:#eee}</style></head><body><h1>CandyTec · Hoja de ruta y preparación</h1><p><b>${dpEscape(d.nombre)}</b> · Selección temporal · Salida ${dpDate(d.fecha_salida)}</p><p>Vehículo: ${dpEscape(d.vehiculo||'Pendiente')} · Conductor: ${dpEscape(d.conductor||'Pendiente')} · Peso ${s.missingWeights.length?'conocido':'planificado'}: ${dpQty(s.knownKg)} kg · Capacidad: ${dpQty(d.capacidad_kg)} kg</p>${s.missingWeights.length?'<p><b>ATENCIÓN: faltan pesos por bulto. Peso total incompleto.</b></p>':''}<p>${dpEscape(d.observaciones)}</p><table><thead><tr><th style="width:4%">N.º</th><th style="width:20%">Cliente / pedido</th><th style="width:23%">Destino</th><th style="width:32%">Productos y cantidades</th><th>Recepción / firma</th></tr></thead><tbody>${d.paradas.map((p,i)=>`<tr><td>${i+1}</td><td><b>${dpEscape(p.client)}</b><br>${dpEscape(p.orderId)}<br>${p.invoice?'Factura '+dpEscape(p.invoice):'POR FACTURAR'}<br>${dpStatus[issues.find(x=>x.key===p.key)?.status]||'Revisar'}</td><td>${dpEscape(p.city)} · ${dpEscape(p.sector)}<br>${dpEscape(p.address)}<br>Prevista: ${dpDate(p.dueDate)}</td><td>${p.items.map(it=>dpEscape(it.name)+' — <b>'+dpQty(it.qty)+'</b>').join('<br>')}<br><b>Peso: ${dpWeightLabel(dpWeightOf([p]))}</b></td><td class="sign"></td></tr>`).join('')}</tbody></table><h2>Totales por pedido</h2><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Cantidad</th><th>Peso</th></tr></thead><tbody>${dpOrderTotals(d.paradas).map(o=>`<tr><td>${dpEscape(o.orderId)}</td><td>${dpEscape(o.client)}</td><td>${dpQty(o.quantity)}</td><td>${dpWeightLabel(o)}</td></tr>`).join('')}</tbody></table><h2>Lista de preparación por producto</h2><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Stock consultado</th><th>Faltante previsto</th></tr></thead><tbody>${s.rows.map(r=>`<tr><td>${dpEscape(r.name)}</td><td>${dpQty(r.qty)}</td><td>${dpQty(r.stock)}</td><td>${dpQty(r.shortage)}</td></tr>`).join('')}</tbody></table><p class="muted">Datos consultados: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}. Documento de planificación; confirmar facturación, disponibilidad y dirección antes de cargar. Registra la salida física y la entrega en el sistema.</p></body></html>`;
     dialog.appendChild(frame);DP.message='Hoja de ruta lista para imprimir o guardar como PDF.';
   }catch(e){dpDocumentError(e);}finally{DP.documentBusy=false;dpRefresh();}
 }
-window.addEventListener('beforeunload',e=>{if(DP.dirty){e.preventDefault();e.returnValue='';}});
+// La selección es temporal: no se guarda ni bloquea la salida de la página.
 
 /* ---- init ---- */
 tryAutoLogin();
