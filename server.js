@@ -3,6 +3,7 @@ dotenv.config();
 
 const express = require('express');
 const dispatchPlanner = require('./lib/dispatch-planner');
+const inventoryMovement = require('./lib/inventory-movement');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -305,6 +306,7 @@ async function initDB() {
     }
 
     await dispatchPlanner.init(pool);
+    await inventoryMovement.init(pool);
     console.log('✓ Base de datos inicializada');
   } catch (err) {
     console.error('DB init error:', err);
@@ -841,6 +843,7 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 // HEALTH CHECK
 // ============================================================
 dispatchPlanner.register(app, pool, verifyToken);
+inventoryMovement.register(app, pool, verifyToken);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });

@@ -1592,7 +1592,11 @@ async function confirmNuevoItem(){
     toast('Ítem "'+nombre+'" creado');
   }finally{ releaseGuard('confirmNuevoItem'); }
 }
+let inventoryWriteVersion=0;
+const inventorySave={busy:false,pending:null};
 function openMovimiento(id,tipo){
+  if(inventorySave.busy)return;
+  if(inventorySave.pending){toast('Hay un movimiento sin confirmar. Reintenta en el formulario abierto antes de iniciar otro.');return;}
   if(!puedeInventario()){toast('Solo Bodega registra movimientos de inventario');return;}
   const i=INVENTARIO.find(x=>x.id===id); if(!i) return;
   const esIngreso=tipo==='ingreso'||tipo==='ajuste_alza';
@@ -1603,7 +1607,7 @@ function openMovimiento(id,tipo){
       <div><div class="mh-id">${tipoLabel(tipo)} de bodega</div><div class="mh-client">${i.nombre}</div></div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body"><div id="movementStatus" role="status" aria-live="polite" style="margin-bottom:12px;white-space:pre-wrap"></div>
       ${esAjuste?`<div class="section-note"><span class="ni">⚖</span><div>Usa esto para corregir el inventario por conteo físico, mermas, daños o imprevistos — queda registrado por separado de los ingresos y salidas normales.</div></div>`:''}
       <div class="detail-grid" style="margin-bottom:18px">
         <div class="dg"><div class="k">Stock actual</div><div class="v">${i.stock} ${i.unidad}</div></div>
@@ -1618,44 +1622,51 @@ function openMovimiento(id,tipo){
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn ${esIngreso?'btn-gold':'btn-danger'}" onclick="confirmMovimiento(${i.id},'${tipo}')">Registrar</button>
+      <button id="movementSubmit" class="btn ${esIngreso?'btn-gold':'btn-danger'}" onclick="confirmMovimiento(${i.id},'${tipo}')">Registrar</button>
     </div>`;
   document.getElementById('overlay').classList.add('open');
 }
+function movementStatus(message,error=false){
+  const el=document.getElementById('movementStatus');
+  if(el){el.textContent=message;el.style.color=error?'#a12a1d':'#285c37';}
+}
 async function confirmMovimiento(id,tipo){
-  if(guardDouble('confirmMovimiento')) return;
+  if(inventorySave.busy)return;
+  if(!puedeInventario()){movementStatus('Solo Bodega y Gerencia registran movimientos.',true);return;}
+  const item=INVENTARIO.find(x=>x.id===id);
+  if(!item){movementStatus('El ítem ya no existe. Actualiza la página.',true);return;}
+  if(!inventorySave.pending){
+    const cantidad=Number(document.getElementById('m_cantidad').value),motivo=document.getElementById('m_motivo').value.trim();
+    const priceEl=document.getElementById('m_precio'),precio=priceEl?Number(priceEl.value):null;
+    if(!Number.isFinite(cantidad)||cantidad<=0||Math.abs(cantidad*100-Math.round(cantidad*100))>0.00001){movementStatus('Ingresa una cantidad positiva con hasta dos decimales.',true);return;}
+    if(!motivo){movementStatus('El motivo es obligatorio.',true);return;}
+    if(priceEl&&(!Number.isFinite(precio)||precio<=0)){movementStatus('Ingresa un precio válido por '+item.unidad+'.',true);return;}
+    inventorySave.pending={id,body:{tipo,cantidad,motivo,precio,operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'mov-'+Date.now()+'-'+Math.random().toString(36).slice(2)}};
+  }
+  const request=inventorySave.pending;
+  inventorySave.busy=true;inventoryWriteVersion++;
+  const btn=document.getElementById('movementSubmit');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  ['m_cantidad','m_motivo','m_precio'].forEach(key=>{const el=document.getElementById(key);if(el)el.disabled=true;});
+  movementStatus('Guardando en el servidor. Espera la confirmación.');
   try{
-    if(!puedeInventario()){toast('Solo Bodega registra movimientos de inventario');return;}
-    const i=INVENTARIO.find(x=>x.id===id);
-    const cantidad=parseFloat(document.getElementById('m_cantidad').value);
-    const motivo=document.getElementById('m_motivo').value.trim();
-    const esMP=i.tipo==='materia_prima';
-    const esIngreso=tipoSigno(tipo)>0;
-    const esAjuste=tipo==='ajuste_alza'||tipo==='ajuste_baja';
-    const precioEl=document.getElementById('m_precio');
-    const precio=precioEl?parseFloat(precioEl.value):null;
-    if(!cantidad||cantidad<=0){toast('Ingresa una cantidad válida');return;}
-    if(!motivo){toast('El motivo es obligatorio');return;}
-    if(esIngreso&&esMP&&!esAjuste&&(!precio||precio<=0)){toast('Ingresa el precio por '+i.unidad+' de la materia prima');return;}
-    if(!esIngreso&&cantidad>i.stock){toast('Stock insuficiente: hay '+i.stock+' '+i.unidad);return;}
-    let nuevoCosto=i.costoProm;
-    if(esIngreso&&esMP&&!esAjuste){
-      // costo promedio ponderado
-      nuevoCosto=+(((i.stock*(i.costoProm||0))+(cantidad*precio))/(i.stock+cantidad)).toFixed(4);
-    }
-    const nuevoStock=+(esIngreso?i.stock+cantidad:i.stock-cantidad).toFixed(2);
-    const fecha=new Date().toISOString();
-    try{
-      await apiPut('/api/inventario/'+id,{stock:nuevoStock,costo_prom:nuevoCosto});
-      const movRow=await apiPost('/api/movimientos',{item_id:id,tipo,cantidad,motivo,usuario:myName()+' · '+ROLES[currentRole].role,fecha});
-      MOVIMIENTOS.push(mapMovimiento(movRow));
-    }catch(err){ toast('No se pudo guardar en el servidor: '+err.message); return; }
-    i.stock=nuevoStock;
-    if(esIngreso&&esMP&&!esAjuste) i.costoProm=nuevoCosto;
-    closeModal();renderView();buildNav();
-    const low=i.stock<i.minimo;
-    toast(tipoLabel(tipo)+' registrado · stock: '+i.stock+' '+i.unidad+(low?' ⚠ bajo mínimo':''));
-  }finally{ releaseGuard('confirmMovimiento'); }
+    const result=await apiPost('/api/inventario/'+request.id+'/movimiento',request.body);
+    if(!result?.inventario||!result?.movimiento)throw Error('El servidor no devolvió la confirmación completa.');
+    inventoryWriteVersion++;
+    const mapped=mapInventario(result.inventario),index=INVENTARIO.findIndex(x=>x.id===mapped.id);
+    if(index>=0)INVENTARIO[index]=mapped;else INVENTARIO.push(mapped);
+    if(!MOVIMIENTOS.some(x=>x.id===result.movimiento.id))MOVIMIENTOS.push(mapMovimiento(result.movimiento));
+    inventorySave.pending=null;
+    renderView();buildNav();
+    movementStatus('Guardado en el servidor · movimiento #'+result.movimiento.id+' · saldo: '+mapped.stock+' '+mapped.unidad+'. Puedes cerrar este formulario.');
+    if(btn){btn.textContent='Guardado';btn.disabled=true;}
+    toast('Movimiento #'+result.movimiento.id+' guardado · stock: '+mapped.stock+' '+mapped.unidad);
+  }catch(err){
+    const definitive=err.status>=400&&err.status<500;
+    if(definitive){inventorySave.pending=null;['m_cantidad','m_motivo','m_precio'].forEach(key=>{const el=document.getElementById(key);if(el)el.disabled=false;});}
+    movementStatus(err.message+(definitive?'':' No cierres el formulario: pulsa Reintentar para confirmar sin duplicar el movimiento.'),true);
+    if(btn){btn.disabled=false;btn.textContent=definitive?'Registrar':'Reintentar';}
+  }finally{inventorySave.busy=false;inventoryWriteVersion++;}
 }
 function openItemMovs(id){
   const i=INVENTARIO.find(x=>x.id===id); if(!i) return;
@@ -2572,7 +2583,7 @@ function modalActions(o){
   if(!acts.length) return '';
   return `<div class="modal-actions">${acts.join('')}</div>`;
 }
-function closeModal(){document.getElementById('overlay').classList.remove('open');}
+function closeModal(){if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
 document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
 function eliminarPedido(id){
   if(currentRole!=='gerente_proy'){toast('Solo tú puedes eliminar pedidos');return;}
@@ -4825,12 +4836,12 @@ async function apiFetch(path, opts){
       throw new Error(msg);
     }
     doLogout();
-    throw new Error('Sesión expirada, vuelve a entrar');
+    const expired=new Error('Sesión expirada, vuelve a entrar');expired.status=401;throw expired;
   }
   if(!res.ok){
     let msg='Error del servidor';
     try{ const j=await res.json(); msg=j.error||msg; }catch(e){}
-    throw new Error(msg);
+    const error=new Error(msg);error.status=res.status;throw error;
   }
   if(res.status===204) return null;
   return res.json();
@@ -4963,6 +4974,7 @@ function syncPedido(o, extra){
 
 /* trae todo del servidor y llena los arrays que usa la pantalla */
 async function loadAllData(){
+  const inventoryVersionAtStart=inventoryWriteVersion;
   const [clientesR, pedidosR, produccionesR, movimientosR, solicitudesR, inventarioR, catalogoR] = await Promise.all([
     apiGet('/api/clientes'), apiGet('/api/pedidos'), apiGet('/api/producciones'),
     apiGet('/api/movimientos'), apiGet('/api/solicitudes'), apiGet('/api/inventario'), apiGet('/api/catalogo'),
@@ -4970,9 +4982,9 @@ async function loadAllData(){
   CLIENTES.length=0; clientesR.forEach(r=>CLIENTES.push(mapCliente(r)));
   ORDERS = pedidosR.map(mapPedido);
   PRODUCCIONES.length=0; produccionesR.forEach(r=>PRODUCCIONES.push(mapProduccion(r)));
-  MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));
+  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
   SOLICITUDES.length=0; solicitudesR.forEach(r=>SOLICITUDES.push(mapSolicitud(r)));
-  INVENTARIO.length=0; inventarioR.forEach(r=>INVENTARIO.push(mapInventario(r)));
+  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy){INVENTARIO.length=0; inventarioR.forEach(r=>INVENTARIO.push(mapInventario(r)));}
   if(catalogoR&&catalogoR.length){ CATALOGO.length=0; catalogoR.forEach(r=>CATALOGO.push(r.nombre)); CATALOGO_IDS=catalogoR; }
 }
 let CATALOGO_IDS=[];
