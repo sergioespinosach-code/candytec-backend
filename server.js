@@ -4,6 +4,7 @@ dotenv.config();
 const express = require('express');
 const dispatchPlanner = require('./lib/dispatch-planner');
 const inventoryMovement = require('./lib/inventory-movement');
+const orderFinance = require('./lib/order-finance');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -307,6 +308,7 @@ async function initDB() {
 
     await dispatchPlanner.init(pool);
     await inventoryMovement.init(pool);
+    await orderFinance.init(pool);
     console.log('✓ Base de datos inicializada');
   } catch (err) {
     console.error('DB init error:', err);
@@ -608,6 +610,7 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
     if (!current.rows.length) return res.status(404).json({ error: 'Pedido no encontrado' });
     const row = current.rows[0];
     const b = req.body;
+    orderFinance.protect(row,b);
 
     const merged = {
       factura: b.factura !== undefined ? b.factura : row.factura,
@@ -632,14 +635,15 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
     const result = await pool.query(
       `UPDATE pedidos SET factura=$1, estado=$2, fecha_cobro=$3, subtotal=$4, descuento=$5,
        descuento_motivo=$6, recibio_nombre=$7, pago=$8, history=$9, attach=$10, products=$11, fecha_entrega=$12, entregas=$13, direccion_entrega=$14, iva_tasa=$15, costo_transporte=$16, costo_estibaje=$17
-       WHERE numero_pedido=$18 RETURNING *`,
+       WHERE numero_pedido=$18 AND financial_data=$19::jsonb RETURNING *`,
       [merged.factura, merged.estado, merged.fecha_cobro, merged.subtotal, merged.descuento,
        merged.descuento_motivo, merged.recibio_nombre, merged.pago, merged.history, merged.attach,
-       merged.products, merged.fecha_entrega, merged.entregas, merged.direccion_entrega, merged.iva_tasa, merged.costo_transporte, merged.costo_estibaje, req.params.id]
+       merged.products, merged.fecha_entrega, merged.entregas, merged.direccion_entrega, merged.iva_tasa, merged.costo_transporte, merged.costo_estibaje, req.params.id, JSON.stringify(row.financial_data)]
     );
+    if(!result.rows.length)return res.status(409).json({error:'El pedido recibió un ajuste financiero. Actualiza antes de guardar.'});
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status||500).json({ error: err.message });
   }
 });
 
@@ -844,6 +848,7 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 // ============================================================
 dispatchPlanner.register(app, pool, verifyToken);
 inventoryMovement.register(app, pool, verifyToken);
+orderFinance.register(app, pool, verifyToken);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });

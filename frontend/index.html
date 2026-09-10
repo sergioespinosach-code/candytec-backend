@@ -414,6 +414,76 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
 @media(max-width:1180px){.dp-simple-layout{grid-template-columns:1fr}.dp-simple-summary{position:static}.dp-simple-summary .dp-cargo-body{max-height:none}.dp-simple-layout .dp-candidates{max-height:50vh}}
 
 </style>
+<script>
+/* BEGIN ORDER FINANCE CORE */
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.CandyFinance=factory();})(typeof globalThis!=='undefined'?globalThis:this,function(){
+  'use strict';
+  const list=v=>Array.isArray(v)?v:[], cents=v=>Math.round(Number(v||0)*100), amount=v=>v/100;
+  function invoices(o){
+    const products=list(o.products),price=new Map();
+    products.forEach(p=>{const r=price.get(p.name)||{qty:0,value:0};r.qty+=Number(p.qty||0);r.value+=Number(p.qty||0)*Number(p.price||0);price.set(p.name,r);});
+    const gross=products.reduce((s,p)=>s+Number(p.qty||0)*Number(p.price||0),0),factor=1-Math.min(100,Math.max(0,Number(o.descuento||0)))/100;
+    const rate=Number(o.iva_tasa??o.ivaTasa??15),groups=new Map(),deliveries=list(o.entregas);
+    if(deliveries.length){
+      deliveries.forEach(e=>{if(!e.numeroFactura)return;const key=String(e.numeroFactura).trim();let value=0;
+        list(e.items).forEach(i=>{const p=price.get(i.name);value+=Number(i.qty||0)*(p&&p.qty?p.value/p.qty:0);});
+        groups.set(key,(groups.get(key)||0)+value);
+      });
+    }else if(o.factura)groups.set(String(o.factura).trim(),gross||Number(o.subtotal||0));
+    return [...groups].map(([numero,value])=>{const base=cents(value*factor);return {numero,base:amount(base),iva:amount(Math.round(base*rate/100))};});
+  }
+  function summary(o){
+    const data=o.financial_data||o.finanzas||{},events=list(data.events),snapshots=list(data.snapshots);
+    const reversed=new Set(events.filter(e=>e.type==='REVERSO').map(e=>e.target));
+    const live=events.filter(e=>e.type!=='REVERSO'&&!reversed.has(e.id));
+    const source=invoices(o),byNumber=new Map(source.map(i=>[i.numero,i]));
+    snapshots.forEach(i=>byNumber.set(i.numero,i));
+    let original=0,corrected=0,credit=0,baseNet=0,ivaNet=0;
+    const rows=[...byNumber.values()].map(i=>{
+      let base=cents(i.base),iva=cents(i.iva),ncBase=0,ncIva=0;
+      live.filter(e=>e.invoice===i.numero).forEach(e=>{if(e.type==='CORRECCION'){base=cents(e.base);iva=cents(e.iva);}else if(e.type==='NC'){ncBase+=cents(e.base);ncIva+=cents(e.iva);}});
+      original+=cents(i.base)+cents(i.iva);corrected+=base+iva;credit+=ncBase+ncIva;baseNet+=base-ncBase;ivaNet+=iva-ncIva;
+      return {numero:i.numero,originalBase:Number(i.base),originalIva:Number(i.iva),base:amount(base),iva:amount(iva),ncBase:amount(ncBase),ncIva:amount(ncIva),netBase:amount(base-ncBase),netIva:amount(iva-ncIva),total:amount(base+iva-ncBase-ncIva)};
+    });
+    const paid=list(o.pago?.abonos).reduce((s,a)=>s+cents(a.monto),0),net=baseNet+ivaNet;
+    return {invoices:rows,original:amount(original),corrections:amount(corrected-original),credits:amount(credit),base:amount(baseNet),iva:amount(ivaNet),net:amount(net),paid:amount(paid),balance:amount(Math.max(0,net-paid)),creditBalance:amount(Math.max(0,paid-net)),events,reversed:[...reversed]};
+  }
+  function moneyInput(v){
+    if(v==null||v===''||typeof v==='boolean')throw Error('Ingresa base e IVA; usa 0 cuando no corresponda.');
+    const n=Number(v);if(!Number.isFinite(n)||n<0||n>=1e8||Math.abs(n*100-Math.round(n*100))>0.00001)throw Error('Los importes deben ser positivos o cero, con hasta dos decimales.');return amount(cents(n));
+  }
+  function append(o,input,actor,now){
+    const data=JSON.parse(JSON.stringify(o.financial_data||{events:[],snapshots:[]}));data.events=list(data.events);data.snapshots=list(data.snapshots);
+    if(!['NC','CORRECCION','REVERSO'].includes(input.type))throw Error('Tipo de ajuste inválido.');
+    const text=(v,max)=>typeof v==='string'&&v.trim()&&v.length<=max;
+    if(!text(input.reason,2000))throw Error('Indica el motivo del ajuste.');
+    if(!text(input.operation_key,100)||!/^[a-zA-Z0-9_-]{16,100}$/.test(input.operation_key))throw Error('Identificador inválido.');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date||'')||!Number.isFinite(Date.parse(input.date+'T00:00:00Z'))||new Date(input.date+'T00:00:00Z').toISOString().slice(0,10)!==input.date)throw Error('Fecha inválida.');
+    const event={id:input.operation_key,type:input.type,reason:input.reason.trim(),date:input.date,actor,createdAt:now};
+    if(input.type==='REVERSO'){
+      const target=data.events.find(e=>e.id===input.target&&e.type!=='REVERSO');
+      if(!target||data.events.some(e=>e.type==='REVERSO'&&e.target===target.id))throw Error('El ajuste no existe o ya está revertido.');
+      Object.assign(event,{target:target.id,invoice:target.invoice});
+    }else{
+      if(!text(input.invoice,255))throw Error('Selecciona una factura.');
+      const invoice=summary(o).invoices.find(i=>i.numero===input.invoice);if(!invoice)throw Error('La factura ya no pertenece al pedido. Actualiza los datos.');
+      if(!data.snapshots.some(i=>i.numero===input.invoice))data.snapshots.push({numero:invoice.numero,base:invoice.originalBase,iva:invoice.originalIva});
+      if(!text(input.number,100))throw Error('Ingresa el número del documento de respaldo.');
+      if(!input.attachment||typeof input.attachment.name!=='string'||!/^https:\/\//i.test(input.attachment.url||''))throw Error('Adjunta el documento emitido en el sistema contable.');
+      Object.assign(event,{invoice:input.invoice,number:input.number.trim(),base:moneyInput(input.base),iva:moneyInput(input.iva),attachment:{name:input.attachment.name.slice(0,255),url:input.attachment.url}});
+      if(event.type==='NC'&&event.base+event.iva===0)throw Error('La nota de crédito debe tener un valor mayor que cero.');
+      if(event.type==='NC'&&data.events.some(e=>e.type==='NC'&&e.number?.toUpperCase()===event.number.toUpperCase()&&!data.events.some(r=>r.type==='REVERSO'&&r.target===e.id)))throw Error('Esta nota de crédito ya está registrada en el pedido.');
+    }
+    data.events.push(event);
+    const next=summary({...o,financial_data:data});
+    if(next.invoices.some(i=>i.netBase<0||i.netIva<0))throw Error('El ajuste deja la base o el IVA de una factura en negativo. Revisa las notas de crédito y sus importes.');
+    return data;
+  }
+  return {invoices,summary,append,moneyInput};
+});
+/* END ORDER FINANCE CORE */
+
+</script>
 </head>
 <body>
 <div id="loginScreen" class="login-screen">
@@ -609,16 +679,19 @@ function computeTotals(o){
   o.total=+(base+o.iva).toFixed(2);
 }
 function recalcPago(o){
-  if(!o.factura){o.pago=null;return;}
+  if(!CandyFinance.invoices(o).length){o.pago=null;return;}
   if(!o.pago) o.pago={vence:'31/07/2026',abonos:[]};
-  const ab=(o.pago.abonos||[]).reduce((a,x)=>a+x.monto,0);
+  const ab=(o.pago.abonos||[]).reduce((a,x)=>a+Number(x.monto||0),0);
   o.pago.cobrado=+ab.toFixed(2);
-  o.pago.saldo=Math.max(0,+(o.total-ab).toFixed(2));
+  const financial=CandyFinance.summary(o);
+  o.pago.saldo=financial.balance;
+  o.pago.saldoFavor=financial.creditBalance;
   o.pago.estado = o.pago.saldo<=0.005?'pagado':(ab>0?'parcial':'pendiente');
 }
 function pagoVencido(o){return !!(o.pago&&o.pago.saldo>0&&parseFecha(o.pago.vence)!==null&&parseFecha(o.pago.vence)<HOY)}
 function pagoBadge(o){
   if(!o.pago) return '<span class="pago-badge pb-na">Sin factura</span>';
+  if(o.pago.saldoFavor>0)return '<span class="pago-badge pb-pagado">Saldo a favor '+money(o.pago.saldoFavor)+'</span>';
   if(pagoVencido(o)) return '<span class="pago-badge pb-vencido">Vencido</span>';
   if(o.pago.estado==='pagado'&&o.state!=='ENTREGADO') return '<span class="pago-badge pb-pagado">Pagado · pendiente de entrega</span>';
   const map={pagado:['pb-pagado','Pagado'],parcial:['pb-parcial','Parcial'],pendiente:['pb-pendiente','Pendiente']};
@@ -895,7 +968,7 @@ function orderCard(o, actionsHTML=''){
       </div>
     </div>
     <div class="oc-foot" onclick="event.stopPropagation()">
-      ${o.total?`<span class="chip">${money(o.total)}</span>`:''}
+      ${o.total?`<span class="chip">Pedido: ${money(o.total)}</span>`:''}${o.factura?`<span class="chip">Facturado neto: ${money(valorFacturadoConIva(o))}</span>`:''}
       <div class="oc-actions">${actionsHTML}</div>
     </div>
   </div>`;
@@ -1185,12 +1258,8 @@ function valorFacturadoBruto(o){ // en $, sin IVA, antes de descuento
   });
   return total;
 }
-function valorFacturadoNeto(o){ // sin IVA, después del descuento del pedido
-  const bruto=valorFacturadoBruto(o);
-  const factor=o.subtotal>0?(1-(o.descuentoMonto||0)/o.subtotal):1;
-  return bruto*factor;
-}
-function valorFacturadoConIva(o){ return valorFacturadoNeto(o)*1.15; }
+function valorFacturadoNeto(o){return CandyFinance.summary(o).base;}
+function valorFacturadoConIva(o){return CandyFinance.summary(o).net;}
 // lo que FALTA por facturar de un pedido, en $ sin IVA y después del descuento —
 // para un pedido nuevo (nada facturado aún) es simplemente su valor completo
 function valorPendienteFacturar(o){
@@ -2382,6 +2451,7 @@ async function createOrder(){
    ORDER DETAIL MODAL + HISTORY
    ============================================================ */
 function openOrder(id){
+  if(financeSaving||financeEditor?.pending){toast('Confirma primero el ajuste pendiente.');return;}
   const o=ORDERS.find(x=>x.id===id); if(!o) return;
   const visAttach=o.attach;
 
@@ -2416,7 +2486,7 @@ function openOrder(id){
       ${o.descuentoMonto&&veDcto?`<tr class="tt"><td colspan="3">Descuento ${o.descuento}%</td><td style="text-align:right;color:var(--bad-tx)">−${money(o.descuentoMonto)}</td></tr>
       <tr class="tt"><td colspan="3">Base (sin IVA)</td><td style="text-align:right">${money(o.subtotal-o.descuentoMonto)}</td></tr>`:''}
       <tr class="tt"><td colspan="3">IVA ${o.ivaTasa!=null?o.ivaTasa:15}%</td><td style="text-align:right">${money(o.iva)}</td></tr>
-      <tr class="tt big"><td colspan="3">Total</td><td style="text-align:right">${money(o.total)}</td></tr>
+      <tr class="tt big"><td colspan="3">Total original del pedido</td><td style="text-align:right">${money(o.total)}</td></tr>
     </table>
     ${o.descuentoMotivo&&veMotivo?`<div class="hint" style="margin:-12px 0 18px"><b>Motivo del descuento:</b> ${o.descuentoMotivo}</div>`:''}`;
   }
@@ -2523,6 +2593,7 @@ function openOrder(id){
       ${o.desc&&o.desc!=='—'?`<div style="margin-bottom:20px;font-size:13.5px;color:var(--ink-2);background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px"><b style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);display:block;margin-bottom:5px">Descripción</b>${o.desc}</div>`:''}
 
       ${prodHTML}
+      ${financePanel(o)}
       ${entregasHTML}
       ${kpiHTML}
       ${pagoHTML}
@@ -2583,7 +2654,7 @@ function modalActions(o){
   if(!acts.length) return '';
   return `<div class="modal-actions">${acts.join('')}</div>`;
 }
-function closeModal(){if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
+function closeModal(){if(financeSaving||financeEditor?.pending){toast('Espera la confirmación del ajuste o pulsa Reintentar.');return;}financeEditor=null;if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
 document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
 function eliminarPedido(id){
   if(currentRole!=='gerente_proy'){toast('Solo tú puedes eliminar pedidos');return;}
@@ -2988,7 +3059,7 @@ function cobCard(o){
       ${pagoBadge(o)}
     </div></div>
     <div class="oc-body">
-      <div class="cob-line"><span>Total factura</span><b>${money(o.total)}</b></div>
+      <div class="cob-line"><span>Facturación neta</span><b>${money(valorFacturadoConIva(o))}</b></div>
       <div class="cob-line"><span>Cobrado</span><b>${money(p.cobrado)}</b></div>
       <div class="cob-line"><span>Saldo</span><b style="color:${p.saldo>0?'var(--bad-tx)':'var(--ok-tx)'}">${money(p.saldo)}</b></div>
       <div class="cob-line"><span>Vence</span><b>${p.vence}</b></div>
@@ -3025,7 +3096,7 @@ function openAbono(id){
     </div>
     <div class="modal-body">
       <div class="detail-grid" style="margin-bottom:18px">
-        <div class="dg"><div class="k">Total factura</div><div class="v">${money(o.total)}</div></div>
+        <div class="dg"><div class="k">Facturación neta</div><div class="v">${money(valorFacturadoConIva(o))}</div></div>
         <div class="dg"><div class="k">Cobrado</div><div class="v">${money(o.pago.cobrado)}</div></div>
         <div class="dg"><div class="k">Saldo pendiente</div><div class="v" style="color:var(--bad-tx)">${money(o.pago.saldo)}</div></div>
         <div class="dg"><div class="k">Vence</div><div class="v">${o.pago.vence}</div></div>
@@ -3063,9 +3134,9 @@ function openAdjuntarDocumento(id){
     <div class="modal-head"><div><div class="mh-id">Adjuntar documento</div><div class="mh-client">${o.id} · ${o.client}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="field" style="margin-bottom:14px">
-        <label>Tipo de documento</label>
+        <label>Tipo de documento</label><p class="hint">Adjuntar un archivo no modifica el saldo. Para registrar sus valores, usa Ajustes de facturación dentro del pedido.</p>
         <select id="doc_tipo" onchange="const w=document.getElementById('doc_otroWrap'); w.style.display=this.value==='Otro'?'':'none';">
-          <option value="Nota de crédito">Nota de crédito</option>
+          <option value="Nota de crédito (solo archivo)">Nota de crédito (solo archivo)</option>
           <option value="Comprobante de pago">Comprobante de pago</option>
           <option value="Factura adicional">Factura adicional</option>
           <option value="Otro">Otro</option>
@@ -3591,7 +3662,7 @@ function viewDashboard(){
     <div class="ds-head"><h2>Ventas por...</h2><span class="ds-sub">Facturado del año, sin IVA, neto de descuentos · cuánto va vendiendo cada uno</span></div>
     <div class="two-col">
       ${rankPanel('Por vendedor',topVendV)}
-      ${rankPanel('Por producto',topProd)}
+      ${rankPanel('Por producto · bruto antes de ajustes',topProd)}
     </div>
     <div class="two-col" style="margin-top:16px">
       ${rankPanel('Por ciudad',topCiu)}
@@ -3931,7 +4002,7 @@ function exportarExcelCompleto(){
   const pedidosData=ORDERS.map(o=>({
     'Número/Factura':pedidoNum(o),'Cliente':o.client,'RUC':o.ruc,'Vendedor':o.vendedor,
     'Estado':STATES[o.state]?STATES[o.state].label:o.state,'Fecha orden':o.fechaOrden,'Fecha entrega':o.fechaEntrega,
-    'Ciudad':o.ciudad,'Provincia':o.provincia,'Subtotal':o.subtotal,'Descuento %':o.descuento,'IVA':o.iva,'Total':o.total,
+    'Ciudad':o.ciudad,'Provincia':o.provincia,'Subtotal':o.subtotal,'Descuento %':o.descuento,'IVA':o.iva,'Total original del pedido':o.total,'Pedido tras ajustes':o.total+CandyFinance.summary(o).corrections-CandyFinance.summary(o).credits,'Facturación original':CandyFinance.summary(o).original,'Correcciones':CandyFinance.summary(o).corrections,'Notas de crédito':CandyFinance.summary(o).credits,'Facturación neta':valorFacturadoConIva(o),'Saldo a favor':CandyFinance.summary(o).creditBalance,
     'Cobrado':o.pago?o.pago.cobrado:0,'Saldo':o.pago?o.pago.saldo:0,'Estado de pago':o.pago?o.pago.estado:'Sin facturar',
   }));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(pedidosData),'Pedidos');
@@ -4089,7 +4160,7 @@ function generarInformePDF(){
     y=doc.lastAutoTable.finalY+10;
 
     if(m.topProductos.length){
-      doc.setFontSize(13); doc.text('Productos más vendidos',14,y); y+=7;
+      doc.setFontSize(13); doc.text('Productos: ventas brutas antes de ajustes',14,y); y+=7;
       doc.autoTable({startY:y,head:[['Producto','Ventas']],body:m.topProductos.slice(0,5).map(([n,v])=>[n,money(v)]),theme:'grid',styles:{fontSize:9}});
       y=doc.lastAutoTable.finalY+10;
     }
@@ -4638,7 +4709,7 @@ function viewReportes(){
       <div class="stat"><div class="sbar" style="background:var(--s-bodega)"></div><div class="sv">${money(ticket)}</div><div class="sl">Ticket promedio</div></div>
     </div>
     <div class="panel" style="margin-top:16px">
-      <h3>1.1 · Ventas por producto &nbsp;·&nbsp; 1.4 · Precio promedio por producto</h3>
+      <h3>1.1 · Ventas por producto &nbsp;·&nbsp; 1.4 · Precio promedio por producto</h3><p>Valores brutos antes de ajustes financieros; las notas de crédito se registran por factura.</p>
       <table class="rank"><tr><th style="text-align:left;font-size:11px;color:var(--muted)">Producto</th><th style="font-size:11px;color:var(--muted)">Unidades</th><th style="font-size:11px;color:var(--muted)">Precio prom.</th><th style="font-size:11px;color:var(--muted);text-align:right">Ventas</th></tr>
         ${prodRank.map(([n,d])=>`<tr><td><div class="rk-name">${n}</div>${bar(d.value/prodMax*100)}</td><td style="text-align:center">${d.qty}</td><td style="text-align:center">${money(d.value/d.qty)}</td><td class="rk-val">${money(d.value)}</td></tr>`).join('')}
       </table>
@@ -4657,7 +4728,7 @@ function viewReportes(){
     <div class="panel">${rankTable(vendRank,vendMax,money)}</div>
 
     <div class="panel" style="margin-top:16px">
-      <h3>3.1 · Ventas por producto por vendedor &nbsp;·&nbsp; 3.2 · Precio promedio por producto por vendedor</h3>
+      <h3>3.1 · Ventas por producto por vendedor &nbsp;·&nbsp; 3.2 · Precio promedio por producto por vendedor</h3><p>Valores brutos antes de ajustes financieros.</p>
       ${vendRank.map(([vn])=>`
         <div style="margin-top:12px">
           <div style="font-weight:600;font-size:13px;margin-bottom:4px">${vn}</div>
@@ -4935,7 +5006,7 @@ function mapPedido(row){
     ivaTasa: row.iva_tasa!=null?+row.iva_tasa:15,
     costoTransporte: row.costo_transporte!=null?+row.costo_transporte:0,
     costoEstibaje: row.costo_estibaje!=null?+row.costo_estibaje:0,
-    pago: row.pago||null, entregas: row.entregas||[],
+    pago: row.pago||null, entregas: row.entregas||[], finanzas:row.financial_data||{events:[],snapshots:[]},
   };
   computeTotals(o);
   recalcPago(o);
@@ -4974,13 +5045,15 @@ function syncPedido(o, extra){
 
 /* trae todo del servidor y llena los arrays que usa la pantalla */
 async function loadAllData(){
+  const financialEditorAtStart=typeof financeEditor==='undefined'?null:financeEditor;
+  const financialVersionAtStart=typeof financialWriteVersion==='undefined'?0:financialWriteVersion;
   const inventoryVersionAtStart=inventoryWriteVersion;
   const [clientesR, pedidosR, produccionesR, movimientosR, solicitudesR, inventarioR, catalogoR] = await Promise.all([
     apiGet('/api/clientes'), apiGet('/api/pedidos'), apiGet('/api/producciones'),
     apiGet('/api/movimientos'), apiGet('/api/solicitudes'), apiGet('/api/inventario'), apiGet('/api/catalogo'),
   ]);
   CLIENTES.length=0; clientesR.forEach(r=>CLIENTES.push(mapCliente(r)));
-  ORDERS = pedidosR.map(mapPedido);
+  if(financialVersionAtStart===(typeof financialWriteVersion==='undefined'?0:financialWriteVersion)&&(typeof financeSaving==='undefined'||!financeSaving)&&(typeof financeEditor==='undefined'||(!financeEditor&&financialEditorAtStart===financeEditor)))ORDERS = pedidosR.map(mapPedido);
   PRODUCCIONES.length=0; produccionesR.forEach(r=>PRODUCCIONES.push(mapProduccion(r)));
   if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
   SOLICITUDES.length=0; solicitudesR.forEach(r=>SOLICITUDES.push(mapSolicitud(r)));
@@ -5376,6 +5449,73 @@ async function dpPrint(){
   }catch(e){dpDocumentError(e);}finally{DP.documentBusy=false;dpRefresh();}
 }
 // La selección es temporal: no se guarda ni bloquea la salida de la página.
+
+/* Registro interno de documentos contables externos. */
+let financeEditor=null,financeSaving=false,financialWriteVersion=0;
+function financeEscape(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function financeCanEdit(){return esFacturacion()||isGerente();}
+function financePanel(o){
+  const s=CandyFinance.summary(o);if(!s.invoices.length)return '';
+  const e=financeEscape;
+  return `<div class="sec-title">Facturación real y ajustes</div><table class="ptable"><tr><td>Valor del pedido tras ajustes (incluye lo pendiente de facturar)</td><td>${money(o.total+s.corrections-s.credits)}</td></tr><tr><td>Facturado original registrado</td><td>${money(s.original)}</td></tr><tr><td>Correcciones de registro</td><td>${money(s.corrections)}</td></tr><tr><td>Notas de crédito vigentes</td><td>−${money(s.credits)}</td></tr><tr class="tt big"><td>Facturación neta</td><td>${money(s.net)}</td></tr><tr><td>Pagos recibidos</td><td>${money(s.paid)}</td></tr><tr class="tt"><td>Pendiente por cobrar</td><td>${money(s.balance)}</td></tr>${s.creditBalance?`<tr class="tt"><td>Saldo a favor del cliente en este pedido</td><td>${money(s.creditBalance)}</td></tr>`:''}</table>
+    <div class="hint">El total de productos corresponde al pedido original. Este resumen corresponde a lo facturado y ajustado; excluye lo pendiente de facturar. El saldo a favor no se devuelve ni se aplica a otros pedidos automáticamente.</div>
+    ${financeCanEdit()?`<button class="btn btn-gold" data-order="${e(o.id)}" onclick="openFinance(this.dataset.order)">Ajustes de facturación</button>`:''}
+    <div style="overflow:auto;margin:14px 0"><table class="ptable"><tr><th>Factura</th><th>Base corregida</th><th>IVA corregido</th><th>NC</th><th>Neto</th></tr>${s.invoices.map(i=>`<tr><td>${e(i.numero)}</td><td>${money(i.base)}</td><td>${money(i.iva)}</td><td>${money(i.ncBase+i.ncIva)}</td><td>${money(i.total)}</td></tr>`).join('')}</table></div>
+    ${s.events.length?`<div class="sec-title">Historial de ajustes financieros</div>${s.events.slice().reverse().map(a=>`<div class="section-note" style="display:block"><b>${e({NC:'Nota de crédito',CORRECCION:'Corrección de registro',REVERSO:'Reversión de registro'}[a.type])} ${e(a.number||'')}</b> · Factura ${e(a.invoice)} · ${e(a.date)}<br>${a.type==='REVERSO'?'Registro revertido: '+e(s.events.find(x=>x.id===a.target)?.number||'ajuste anterior'):'Base '+money(a.base)+' · IVA '+money(a.iva)}${s.reversed.includes(a.id)?' · REVERTIDO':''}<br>${e(a.reason)}<br><small>${e(a.actor?.name)} · ${e(a.createdAt)}</small>${a.attachment&&/^https:\/\//i.test(a.attachment.url)?`<br><a href="${e(a.attachment.url)}" target="_blank" rel="noopener noreferrer">Ver documento: ${e(a.attachment.name)}</a>`:''}${financeCanEdit()&&a.type!=='REVERSO'&&!s.reversed.includes(a.id)?`<br><button class="btn btn-sm" data-order="${e(o.id)}" data-target="${e(a.id)}" onclick="openFinance(this.dataset.order,this.dataset.target)">Revertir registro</button>`:''}</div>`).join('')}`:''}`;
+}
+async function openFinance(id,target=null){
+  if(!financeCanEdit()||financeSaving)return;
+  if(financeEditor?.pending){toast('Reintenta el ajuste pendiente antes de abrir otro.');return;}
+  try{
+    const data=await apiGet('/api/pedidos/'+encodeURIComponent(id)+'/finanzas');
+    if(financeSaving)return;
+    financeEditor={id,data,target,attachment:null,pending:null};
+    const e=financeEscape,rows=data.summary.invoices;
+    const previous=target?data.summary.events.find(a=>a.id===target):null;
+    document.getElementById('modal').innerHTML=`<div class="modal-head"><div><div class="mh-id">${target?'Revertir registro':'Ajustes de facturación'}</div><div class="mh-client">${e(id)} · ${e(data.pedido.cliente)}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body"><div class="section-note">Registra documentos emitidos en tu sistema contable. Esta pantalla no emite ni anula documentos fiscales y no cambia cantidades ni inventario.</div><div id="financeStatus" role="status" aria-live="polite" style="white-space:pre-wrap;margin:12px 0"></div>
+    <fieldset id="financeFields" style="border:0;padding:0"><div class="formgrid">
+    ${target?`<div class="field full">Se revertirá el efecto de ${e(previous?.number||target)} sobre la factura ${e(previous?.invoice)}. El registro y su documento permanecerán en el historial.</div>`:`<div class="field"><label>Operación</label><select id="f_type" onchange="financeDefaults()"><option value="NC">Registrar nota de crédito</option><option value="CORRECCION">Corregir valores registrados</option></select></div><div class="field"><label>Factura afectada</label><select id="f_invoice" onchange="financeDefaults()">${rows.map(i=>`<option value="${e(i.numero)}">${e(i.numero)} · neto ${money(i.total)}</option>`).join('')}</select></div><div class="field"><label>Número del documento de respaldo</label><input id="f_number" maxlength="100"></div>`}
+    <div class="field"><label>Fecha del documento / reversión</label><input id="f_date" type="date" value="${hoyISO()}"></div>
+    ${target?'':`<div class="field"><label id="f_baseLabel">Base de la nota de crédito, sin IVA</label><input id="f_base" type="number" min="0" step="0.01" oninput="financePreview()"></div><div class="field"><label id="f_ivaLabel">IVA de la nota de crédito</label><input id="f_iva" type="number" min="0" step="0.01" value="0" oninput="financePreview()"></div><div id="financeHelp" class="field full"></div><div class="field full"><label>Documento emitido (PDF o imagen, obligatorio)</label><input type="file" accept="application/pdf,image/*" onchange="financeAttach(this)"><span id="financeFile"></span></div>`}
+    <div class="field full"><label>Motivo obligatorio</label><textarea id="f_reason" maxlength="2000" oninput="financePreview()"></textarea></div></div></fieldset><div id="financePreview" class="section-note" style="display:block"></div></div><div class="modal-actions"><button class="btn" onclick="closeModal()">Cerrar</button><button id="financeSubmit" class="btn btn-gold" onclick="saveFinance()">${target?'Revertir registro':'Registrar ajuste'}</button></div>`;
+    document.getElementById('overlay').classList.add('open');financeDefaults();
+  }catch(err){toast('No se pudo abrir el registro: '+err.message);}
+}
+function financeAttach(el){const editor=financeEditor;handleFileDrop(el,up=>{if(financeEditor!==editor)return;editor.attachment=up;document.getElementById('financeFile').textContent='Adjunto: '+up.name;financePreview();});}
+function financeDefaults(){
+  if(!financeEditor||financeEditor.target){financePreview();return;}
+  const correction=document.getElementById('f_type').value==='CORRECCION',i=financeEditor.data.summary.invoices.find(x=>x.numero===document.getElementById('f_invoice').value);
+  document.getElementById('f_baseLabel').textContent=correction?'Base correcta de la factura, antes de notas de crédito':'Base de la nota de crédito, sin IVA';
+  document.getElementById('f_ivaLabel').textContent=correction?'IVA correcto de la factura (0 si corresponde)':'IVA de la nota de crédito';
+  document.getElementById('f_base').value=correction?i.base:'';document.getElementById('f_iva').value=correction?i.iva:0;
+  document.getElementById('financeHelp').textContent=correction?'Copia los valores de la factura real, antes de descontar notas de crédito. No vuelvas a descontar aquí una nota ya registrada.':'Copia por separado base e IVA del documento. Ambos importes reducen el saldo.';financePreview();
+}
+function financeBody(){
+  const read=id=>document.getElementById(id)?.value;
+  return {type:financeEditor.target?'REVERSO':read('f_type'),target:financeEditor.target,invoice:read('f_invoice'),number:read('f_number'),date:read('f_date'),base:read('f_base'),iva:read('f_iva'),reason:read('f_reason'),attachment:financeEditor.attachment};
+}
+function financePreview(){
+  if(!financeEditor)return;const el=document.getElementById('financePreview');if(!el)return;
+  try{const b={...financeBody(),reason:'Vista previa',number:'Vista previa',attachment:financeEditor.attachment||{name:'Vista previa',url:'https://example.invalid/preview'},operation_key:'preview-financial-operation'};const data=CandyFinance.append(financeEditor.data.pedido,b,{},new Date().toISOString());const s=CandyFinance.summary({...financeEditor.data.pedido,financial_data:data});el.textContent='Resultado: facturación neta '+money(s.net)+' · cobrado '+money(s.paid)+' · pendiente '+money(s.balance)+(s.creditBalance?' · saldo a favor '+money(s.creditBalance):'');}
+  catch(e){el.textContent=e.message;}
+}
+async function saveFinance(){
+  if(!financeCanEdit()||financeSaving||!financeEditor)return;
+  const editor=financeEditor,status=document.getElementById('financeStatus'),button=document.getElementById('financeSubmit');
+  if(!editor.pending){
+    const body={...financeBody(),operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'finance-'+Date.now()+'-'+Math.random().toString(36).slice(2),expected_token:editor.data.token};
+    try{CandyFinance.append(editor.data.pedido,body,{},new Date().toISOString());}catch(e){status.textContent=e.message;return;}editor.pending=body;
+  }
+  financialWriteVersion++;financeSaving=true;document.getElementById('financeFields').disabled=true;button.disabled=true;status.textContent='Guardando el ajuste en el servidor…';
+  try{
+    const result=await apiPost('/api/pedidos/'+encodeURIComponent(editor.id)+'/ajustes-financieros',editor.pending);
+    const order=mapPedido(result.pedido),index=ORDERS.findIndex(o=>o.id===order.id);if(index>=0)ORDERS[index]=order;
+    editor.pending=null;financeEditor=null;financeSaving=false;renderView();buildNav();openOrder(order.id);toast('Ajuste guardado · saldo pendiente '+money(result.summary.balance));
+  }catch(e){
+    if(e.status>=400&&e.status<500){editor.pending=null;document.getElementById('financeFields').disabled=false;}
+    status.textContent=e.message+(editor.pending?' Reintenta en este formulario para no duplicar el ajuste.':'');button.disabled=false;button.textContent=editor.pending?'Reintentar':'Registrar ajuste';
+  }finally{financeSaving=false;financialWriteVersion++;}
+}
 
 /* ---- init ---- */
 tryAutoLogin();
