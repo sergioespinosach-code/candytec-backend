@@ -452,14 +452,50 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
     if(v==null||v===''||typeof v==='boolean')throw Error('Ingresa base e IVA; usa 0 cuando no corresponda.');
     const n=Number(v);if(!Number.isFinite(n)||n<0||n>=1e8||Math.abs(n*100-Math.round(n*100))>0.00001)throw Error('Los importes deben ser positivos o cero, con hasta dos decimales.');return amount(cents(n));
   }
+  function discountLines(o,number){
+    const invoice=summary(o).invoices.find(i=>i.numero===number);if(!invoice)throw Error('Selecciona una factura válida.');
+    const products=list(o.products),quantities=new Map();
+    if(list(o.entregas).length)list(o.entregas).filter(e=>String(e.numeroFactura).trim()===number).forEach(e=>list(e.items).forEach(i=>quantities.set(i.name,(quantities.get(i.name)||0)+Number(i.qty||0))));
+    else products.forEach(p=>quantities.set(p.name,(quantities.get(p.name)||0)+Number(p.qty||0)));
+    let accumulated=0,previous=0;
+    const factor=1-Math.min(100,Math.max(0,Number(o.descuento||0)))/100;
+    const rows=[...quantities].filter(([name,qty])=>qty>0).map(([name,qty])=>{
+      const source=products.filter(p=>p.name===name),n=source.reduce((s,p)=>s+Number(p.qty||0),0),value=source.reduce((s,p)=>s+Number(p.qty||0)*Number(p.price||0),0);
+      if(!n)throw Error('Falta el precio original de '+name+'.');
+      const price=value/n;accumulated+=qty*price*factor;const rounded=cents(accumulated),base=amount(rounded-previous);previous=rounded;
+      return {name,qty,price,base,mode:'percent',value:0};
+    });
+    const total=rows.reduce((s,r)=>s+cents(r.base),0),state=summary(o);
+    const last=state.events.filter(e=>e.invoice===number&&e.type==='CORRECCION'&&e.lineDiscounts&&!state.reversed.includes(e.id)).slice(-1)[0];
+    if(last&&cents(last.base)===cents(invoice.base)){
+      return rows.map(r=>{const saved=last.lineDiscounts.find(l=>l.name===r.name);if(!saved||saved.qty!==r.qty||cents(saved.base)!==cents(r.base))throw Error('El detalle del producto cambió. Revisa la factura antes de corregir.');return {...r,mode:saved.mode,value:saved.value};});
+    }
+    if(total!==cents(invoice.base))throw Error('La factura tiene una corrección global de base sin desglose por producto. Usa Corregir valores registrados para conciliarla antes de aplicar descuentos por producto.');
+    return rows;
+  }
+  function productDiscount(o,number,input){
+    const original=discountLines(o,number);
+    if(!Array.isArray(input)||input.length!==original.length)throw Error('Revisa el detalle de productos de la factura.');
+    const seen=new Set();
+    const lines=input.map(line=>{
+      const source=original.find(r=>r.name===line.name);if(!source||seen.has(line.name))throw Error('Producto inválido o repetido.');seen.add(line.name);
+      if(!['percent','amount'].includes(line.mode))throw Error('Tipo de descuento inválido.');
+      const value=moneyInput(line.value);if(line.mode==='percent'&&value>100)throw Error('El descuento no puede superar 100 %.');
+      const discount=line.mode==='percent'?Math.round(cents(source.base)*value/100):cents(value);
+      if(discount>cents(source.base))throw Error('El descuento supera el valor de '+source.name+'.');
+      return {...source,mode:line.mode,value,discount:amount(discount),net:amount(cents(source.base)-discount)};
+    });
+    return {lines,base:amount(lines.reduce((s,r)=>s+cents(r.net),0))};
+  }
+
   function append(o,input,actor,now){
     const data=JSON.parse(JSON.stringify(o.financial_data||{events:[],snapshots:[]}));data.events=list(data.events);data.snapshots=list(data.snapshots);
-    if(!['NC','CORRECCION','REVERSO'].includes(input.type))throw Error('Tipo de ajuste inválido.');
+    if(!['NC','CORRECCION','REVERSO','DESCUENTO_PRODUCTO'].includes(input.type))throw Error('Tipo de ajuste inválido.');
     const text=(v,max)=>typeof v==='string'&&v.trim()&&v.length<=max;
     if(!text(input.reason,2000))throw Error('Indica el motivo del ajuste.');
     if(!text(input.operation_key,100)||!/^[a-zA-Z0-9_-]{16,100}$/.test(input.operation_key))throw Error('Identificador inválido.');
     if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date||'')||!Number.isFinite(Date.parse(input.date+'T00:00:00Z'))||new Date(input.date+'T00:00:00Z').toISOString().slice(0,10)!==input.date)throw Error('Fecha inválida.');
-    const event={id:input.operation_key,type:input.type,reason:input.reason.trim(),date:input.date,actor,createdAt:now};
+    const event={id:input.operation_key,type:input.type==='DESCUENTO_PRODUCTO'?'CORRECCION':input.type,reason:input.reason.trim(),date:input.date,actor,createdAt:now};
     if(input.type==='REVERSO'){
       const target=data.events.find(e=>e.id===input.target&&e.type!=='REVERSO');
       if(!target||data.events.some(e=>e.type==='REVERSO'&&e.target===target.id))throw Error('El ajuste no existe o ya está revertido.');
@@ -470,7 +506,9 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
       if(!data.snapshots.some(i=>i.numero===input.invoice))data.snapshots.push({numero:invoice.numero,base:invoice.originalBase,iva:invoice.originalIva});
       if(!text(input.number,100))throw Error('Ingresa el número del documento de respaldo.');
       if(!input.attachment||typeof input.attachment.name!=='string'||!/^https:\/\//i.test(input.attachment.url||''))throw Error('Adjunta el documento emitido en el sistema contable.');
-      Object.assign(event,{invoice:input.invoice,number:input.number.trim(),base:moneyInput(input.base),iva:moneyInput(input.iva),attachment:{name:input.attachment.name.slice(0,255),url:input.attachment.url}});
+      const discount=input.type==='DESCUENTO_PRODUCTO'?productDiscount(o,input.invoice,input.lines):null;
+      if(discount){event.lineDiscounts=discount.lines;event.subtype='DESCUENTO_PRODUCTO';}
+      Object.assign(event,{invoice:input.invoice,number:input.number.trim(),base:discount?discount.base:moneyInput(input.base),iva:moneyInput(input.iva),attachment:{name:input.attachment.name.slice(0,255),url:input.attachment.url}});
       if(event.type==='NC'&&event.base+event.iva===0)throw Error('La nota de crédito debe tener un valor mayor que cero.');
       if(event.type==='NC'&&data.events.some(e=>e.type==='NC'&&e.number?.toUpperCase()===event.number.toUpperCase()&&!data.events.some(r=>r.type==='REVERSO'&&r.target===e.id)))throw Error('Esta nota de crédito ya está registrada en el pedido.');
     }
@@ -479,7 +517,7 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
     if(next.invoices.some(i=>i.netBase<0||i.netIva<0))throw Error('El ajuste deja la base o el IVA de una factura en negativo. Revisa las notas de crédito y sus importes.');
     return data;
   }
-  return {invoices,summary,append,moneyInput};
+  return {invoices,summary,append,moneyInput,discountLines,productDiscount};
 });
 /* END ORDER FINANCE CORE */
 
@@ -5461,7 +5499,7 @@ function financePanel(o){
     <div class="hint">El total de productos corresponde al pedido original. Este resumen corresponde a lo facturado y ajustado; excluye lo pendiente de facturar. El saldo a favor no se devuelve ni se aplica a otros pedidos automáticamente.</div>
     ${financeCanEdit()?`<button class="btn btn-gold" data-order="${e(o.id)}" onclick="openFinance(this.dataset.order)">Ajustes de facturación</button>`:''}
     <div style="overflow:auto;margin:14px 0"><table class="ptable"><tr><th>Factura</th><th>Base corregida</th><th>IVA corregido</th><th>NC</th><th>Neto</th></tr>${s.invoices.map(i=>`<tr><td>${e(i.numero)}</td><td>${money(i.base)}</td><td>${money(i.iva)}</td><td>${money(i.ncBase+i.ncIva)}</td><td>${money(i.total)}</td></tr>`).join('')}</table></div>
-    ${s.events.length?`<div class="sec-title">Historial de ajustes financieros</div>${s.events.slice().reverse().map(a=>`<div class="section-note" style="display:block"><b>${e({NC:'Nota de crédito',CORRECCION:'Corrección de registro',REVERSO:'Reversión de registro'}[a.type])} ${e(a.number||'')}</b> · Factura ${e(a.invoice)} · ${e(a.date)}<br>${a.type==='REVERSO'?'Registro revertido: '+e(s.events.find(x=>x.id===a.target)?.number||'ajuste anterior'):'Base '+money(a.base)+' · IVA '+money(a.iva)}${s.reversed.includes(a.id)?' · REVERTIDO':''}<br>${e(a.reason)}<br><small>${e(a.actor?.name)} · ${e(a.createdAt)}</small>${a.attachment&&/^https:\/\//i.test(a.attachment.url)?`<br><a href="${e(a.attachment.url)}" target="_blank" rel="noopener noreferrer">Ver documento: ${e(a.attachment.name)}</a>`:''}${financeCanEdit()&&a.type!=='REVERSO'&&!s.reversed.includes(a.id)?`<br><button class="btn btn-sm" data-order="${e(o.id)}" data-target="${e(a.id)}" onclick="openFinance(this.dataset.order,this.dataset.target)">Revertir registro</button>`:''}</div>`).join('')}`:''}`;
+    ${s.events.length?`<div class="sec-title">Historial de ajustes financieros</div>${s.events.slice().reverse().map(a=>`<div class="section-note" style="display:block"><b>${e({NC:'Nota de crédito',CORRECCION:'Corrección de registro',REVERSO:'Reversión de registro'}[a.type])} ${e(a.number||'')}</b> · Factura ${e(a.invoice)} · ${e(a.date)}<br>${a.type==='REVERSO'?'Registro revertido: '+e(s.events.find(x=>x.id===a.target)?.number||'ajuste anterior'):'Base '+money(a.base)+' · IVA '+money(a.iva)}${s.reversed.includes(a.id)?' · REVERTIDO':''}<br>${e(a.reason)}<br><small>${e(a.actor?.name)} · ${e(a.createdAt)}</small>${a.lineDiscounts?`<div style="overflow:auto"><table class="ptable"><tr><th>Producto / cantidad</th><th>Base anterior</th><th>Descuento registrado</th><th>Base final</th></tr>${a.lineDiscounts.map(l=>`<tr><td>${e(l.name)} · ${e(l.qty)}</td><td>${money(l.base)}</td><td>${l.mode==='percent'?e(l.value)+' % · ':''}${money(l.discount)}</td><td>${money(l.net)}</td></tr>`).join('')}</table></div>`:''}${a.attachment&&/^https:\/\//i.test(a.attachment.url)?`<br><a href="${e(a.attachment.url)}" target="_blank" rel="noopener noreferrer">Ver documento: ${e(a.attachment.name)}</a>`:''}${financeCanEdit()&&a.type!=='REVERSO'&&!s.reversed.includes(a.id)?`<br><button class="btn btn-sm" data-order="${e(o.id)}" data-target="${e(a.id)}" onclick="openFinance(this.dataset.order,this.dataset.target)">Revertir registro</button>`:''}</div>`).join('')}`:''}`;
 }
 async function openFinance(id,target=null){
   if(!financeCanEdit()||financeSaving)return;
@@ -5474,9 +5512,9 @@ async function openFinance(id,target=null){
     const previous=target?data.summary.events.find(a=>a.id===target):null;
     document.getElementById('modal').innerHTML=`<div class="modal-head"><div><div class="mh-id">${target?'Revertir registro':'Ajustes de facturación'}</div><div class="mh-client">${e(id)} · ${e(data.pedido.cliente)}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body"><div class="section-note">Registra documentos emitidos en tu sistema contable. Esta pantalla no emite ni anula documentos fiscales y no cambia cantidades ni inventario.</div><div id="financeStatus" role="status" aria-live="polite" style="white-space:pre-wrap;margin:12px 0"></div>
     <fieldset id="financeFields" style="border:0;padding:0"><div class="formgrid">
-    ${target?`<div class="field full">Se revertirá el efecto de ${e(previous?.number||target)} sobre la factura ${e(previous?.invoice)}. El registro y su documento permanecerán en el historial.</div>`:`<div class="field"><label>Operación</label><select id="f_type" onchange="financeDefaults()"><option value="NC">Registrar nota de crédito</option><option value="CORRECCION">Corregir valores registrados</option></select></div><div class="field"><label>Factura afectada</label><select id="f_invoice" onchange="financeDefaults()">${rows.map(i=>`<option value="${e(i.numero)}">${e(i.numero)} · neto ${money(i.total)}</option>`).join('')}</select></div><div class="field"><label>Número del documento de respaldo</label><input id="f_number" maxlength="100"></div>`}
+    ${target?`<div class="field full">Se revertirá el efecto de ${e(previous?.number||target)} sobre la factura ${e(previous?.invoice)}. El registro y su documento permanecerán en el historial.</div>`:`<div class="field"><label>Operación</label><select id="f_type" onchange="financeDefaults()"><option value="NC">Registrar nota de crédito</option><option value="CORRECCION">Corregir valores registrados</option><option value="DESCUENTO_PRODUCTO">Corregir descuento por producto</option></select></div><div class="field"><label>Factura afectada</label><select id="f_invoice" onchange="financeDefaults()">${rows.map(i=>`<option value="${e(i.numero)}">${e(i.numero)} · neto ${money(i.total)}</option>`).join('')}</select></div><div class="field"><label>Número del documento de respaldo</label><input id="f_number" maxlength="100"></div>`}
     <div class="field"><label>Fecha del documento / reversión</label><input id="f_date" type="date" value="${hoyISO()}"></div>
-    ${target?'':`<div class="field"><label id="f_baseLabel">Base de la nota de crédito, sin IVA</label><input id="f_base" type="number" min="0" step="0.01" oninput="financePreview()"></div><div class="field"><label id="f_ivaLabel">IVA de la nota de crédito</label><input id="f_iva" type="number" min="0" step="0.01" value="0" oninput="financePreview()"></div><div id="financeHelp" class="field full"></div><div class="field full"><label>Documento emitido (PDF o imagen, obligatorio)</label><input type="file" accept="application/pdf,image/*" onchange="financeAttach(this)"><span id="financeFile"></span></div>`}
+    ${target?'':`<div class="field"><label id="f_baseLabel">Base de la nota de crédito, sin IVA</label><input id="f_base" type="number" min="0" step="0.01" oninput="financePreview()"></div><div class="field"><label id="f_ivaLabel">IVA de la nota de crédito</label><input id="f_iva" type="number" min="0" step="0.01" value="0" oninput="financePreview()"></div><div id="financeHelp" class="field full"></div><div id="financeProductLines" class="field full" style="overflow:auto"></div><div class="field full"><label>Documento emitido (PDF o imagen, obligatorio)</label><input type="file" accept="application/pdf,image/*" onchange="financeAttach(this)"><span id="financeFile"></span></div>`}
     <div class="field full"><label>Motivo obligatorio</label><textarea id="f_reason" maxlength="2000" oninput="financePreview()"></textarea></div></div></fieldset><div id="financePreview" class="section-note" style="display:block"></div></div><div class="modal-actions"><button class="btn" onclick="closeModal()">Cerrar</button><button id="financeSubmit" class="btn btn-gold" onclick="saveFinance()">${target?'Revertir registro':'Registrar ajuste'}</button></div>`;
     document.getElementById('overlay').classList.add('open');financeDefaults();
   }catch(err){toast('No se pudo abrir el registro: '+err.message);}
@@ -5484,15 +5522,39 @@ async function openFinance(id,target=null){
 function financeAttach(el){const editor=financeEditor;handleFileDrop(el,up=>{if(financeEditor!==editor)return;editor.attachment=up;document.getElementById('financeFile').textContent='Adjunto: '+up.name;financePreview();});}
 function financeDefaults(){
   if(!financeEditor||financeEditor.target){financePreview();return;}
-  const correction=document.getElementById('f_type').value==='CORRECCION',i=financeEditor.data.summary.invoices.find(x=>x.numero===document.getElementById('f_invoice').value);
+  const kind=document.getElementById('f_type').value,byProduct=kind==='DESCUENTO_PRODUCTO',correction=kind==='CORRECCION'||byProduct,i=financeEditor.data.summary.invoices.find(x=>x.numero===document.getElementById('f_invoice').value);
+  financeEditor.productLines=null;document.getElementById('financeProductLines').innerHTML='';document.getElementById('f_base').readOnly=byProduct;
   document.getElementById('f_baseLabel').textContent=correction?'Base correcta de la factura, antes de notas de crédito':'Base de la nota de crédito, sin IVA';
   document.getElementById('f_ivaLabel').textContent=correction?'IVA correcto de la factura (0 si corresponde)':'IVA de la nota de crédito';
   document.getElementById('f_base').value=correction?i.base:'';document.getElementById('f_iva').value=correction?i.iva:0;
-  document.getElementById('financeHelp').textContent=correction?'Copia los valores de la factura real, antes de descontar notas de crédito. No vuelvas a descontar aquí una nota ya registrada.':'Copia por separado base e IVA del documento. Ambos importes reducen el saldo.';financePreview();
+  document.getElementById('financeHelp').textContent=correction?'Copia los valores de la factura real, antes de descontar notas de crédito. No vuelvas a descontar aquí una nota ya registrada.':'Copia por separado base e IVA del documento. Ambos importes reducen el saldo.';
+  if(byProduct){financeProductForm(i);return;}financePreview();
 }
+function financeProductForm(invoice){
+  financeEditor.productLines=null;
+  document.getElementById('financeHelp').textContent='Indica el descuento que consta en la factura para cada producto: porcentaje o dólares sobre el total del producto, no por unidad. La base inicial ya incluye el descuento general del pedido. Verifica el IVA final contra la factura y no repitas descuentos registrados como nota de crédito.';
+  document.getElementById('f_baseLabel').textContent='Base final calculada de la factura';
+  document.getElementById('f_ivaLabel').textContent='IVA final: verifica el importe de la factura';
+  try{
+    const rows=CandyFinance.discountLines(financeEditor.data.pedido,invoice.numero);financeEditor.productLines=rows;
+    financeEditor.productTaxRatio=invoice.base>0?invoice.iva/invoice.base:0;
+    document.getElementById('financeProductLines').innerHTML=`<table class="ptable"><tr><th>Producto / cantidad facturada</th><th>Base registrada</th><th>Descuento</th><th>Valor</th><th>Base final</th></tr>${rows.map((r,index)=>`<tr><td>${financeEscape(r.name)}<br>${financeEscape(r.qty)} · precio registrado ${money(r.price)}</td><td>${money(r.base)}</td><td><select id="fp_mode_${index}" onchange="financeProductChange()"><option value="percent" ${r.mode==='percent'?'selected':''}>%</option><option value="amount" ${r.mode==='amount'?'selected':''}>$ total producto</option></select></td><td><input id="fp_value_${index}" aria-label="Descuento de ${financeEscape(r.name)}" type="number" min="0" step="0.01" value="${r.value}" style="width:90px" oninput="financeProductChange()"></td><td id="fp_net_${index}"></td></tr>`).join('')}</table><p class="hint">Si el mismo producto tiene varias líneas, se agrupa su cantidad y se usa su precio promedio. El descuento se aplica al total facturado de ese producto.</p>`;
+    financeProductChange();
+  }catch(e){document.getElementById('financeProductLines').textContent=e.message;financePreview();}
+}
+function financeProductChange(){
+  try{
+    const b=financeBody(),result=CandyFinance.productDiscount(financeEditor.data.pedido,b.invoice,b.lines);
+    document.getElementById('f_base').value=result.base;
+    document.getElementById('f_iva').value=(Math.round(result.base*financeEditor.productTaxRatio*100)/100).toFixed(2);
+    result.lines.forEach((r,index)=>document.getElementById('fp_net_'+index).textContent=money(r.net));
+  }catch(e){document.getElementById('financePreview').textContent=e.message;return;}
+  financePreview();
+}
+
 function financeBody(){
   const read=id=>document.getElementById(id)?.value;
-  return {type:financeEditor.target?'REVERSO':read('f_type'),target:financeEditor.target,invoice:read('f_invoice'),number:read('f_number'),date:read('f_date'),base:read('f_base'),iva:read('f_iva'),reason:read('f_reason'),attachment:financeEditor.attachment};
+  return {type:financeEditor.target?'REVERSO':read('f_type'),target:financeEditor.target,invoice:read('f_invoice'),number:read('f_number'),date:read('f_date'),base:read('f_base'),iva:read('f_iva'),reason:read('f_reason'),attachment:financeEditor.attachment,lines:financeEditor.productLines?.map((r,index)=>({name:r.name,mode:read('fp_mode_'+index),value:read('fp_value_'+index)}))};
 }
 function financePreview(){
   if(!financeEditor)return;const el=document.getElementById('financePreview');if(!el)return;
