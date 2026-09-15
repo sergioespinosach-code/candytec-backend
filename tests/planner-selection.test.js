@@ -71,9 +71,14 @@ test('consulta permite calcular sin guardar y borrar vacía la selección sin es
 test('la matriz separa clientes por día y arrastra el inventario final',()=>{
   const {ctx,data}=setup();data.inventory=[{tipo:'producto_terminado',nombre:'YumYum',stock:14},{tipo:'producto_terminado',nombre:'Cream',stock:5}];
   ctx.dpSelect('P1:pendiente');ctx.dpSelect('P2:pendiente');ctx.dpDispatchDate(1,'2026-09-09');
-  const plan=ctx.dpSchedule();assert.equal(plan.days.length,2);assert.equal(plan.days[0].rows[0].client,'Norte <b>');assert.equal(plan.days[0].final.get('YumYum'),4);
-  assert.equal(plan.days[1].initial.get('YumYum'),4);assert.equal(plan.days[1].final.get('YumYum'),-2);
+  const plan=ctx.dpSchedule();assert.equal(plan.days.length,6);assert.equal(plan.days[1].rows[0].client,'Norte <b>');assert.equal(plan.days[1].final.get('YumYum'),4);
+  assert.equal(plan.days[2].initial.get('YumYum'),4);assert.equal(plan.days[2].final.get('YumYum'),-2);assert.equal(plan.days[5].final.get('YumYum'),-2);
   const rendered=ctx.dpSummaryHTML();assert.match(rendered,/Norte &lt;b&gt;/);assert.match(rendered,/Sur/);assert.match(rendered,/dp-stock-negative/);
+});
+test('permite escoger la semana completa y reasigna fechas que quedan fuera',()=>{
+  const {ctx,dp}=setup();ctx.dpSelect('P1:pendiente');assert.deepEqual(Array.from(ctx.dpWeekDays(dp.draft.fecha_salida)),['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12']);
+  ctx.dpDispatchDate(0,'2026-09-11');assert.equal(dp.draft.paradas[0].dispatchDate,'2026-09-11');ctx.dpSetWeek('2026-09-16');
+  assert.equal(dp.draft.fecha_salida,'2026-09-14');assert.equal(dp.draft.paradas[0].dispatchDate,'2026-09-14');assert.equal(ctx.dpSchedule().days.length,6);
 });
 test('la fecha elegida de despacho se conserva al validar el documento',async()=>{
   const {ctx,dp}=setup();ctx.dpSelect('P1:pendiente');ctx.dpDispatchDate(0,'2026-09-12');

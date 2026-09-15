@@ -413,6 +413,7 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
 .dp-mode{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}.dp-simple-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.dp-simple-summary{position:sticky;top:16px}.dp-simple-summary .dp-cargo-body{padding-top:18px;max-height:65vh;overflow:auto}.dp-simple-summary h3{margin-top:18px}.dp-simple-summary .dp-muted{margin-top:10px}.dp .dp-check{display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer}.dp .dp-check input{width:19px;height:19px;margin:0;accent-color:#b83e28;flex-shrink:0}.dp-check small{display:block;margin-top:4px;font-size:11px;font-weight:400;color:#575d68}.dp-simple-qty{width:85px;min-height:36px;border:1px solid #bcc6d1;border-radius:6px;padding:6px;text-align:right;background:white;color:#17212c}.dp details summary{cursor:pointer;font-size:12px;font-weight:600}.dp-simple-summary .dp-footer{border-top:0;border-bottom:1px solid #e5e9ee}.dp-candidate>.dp-muted{margin-top:6px}.dp-candidate .dp-row>strong{font-size:12px}.dp-list-count{padding:12px 0}.dp .dp-table tfoot{background:#f2f4f7}
 @media(max-width:1180px){.dp-simple-layout{grid-template-columns:1fr}.dp-simple-summary{position:static}.dp-simple-summary .dp-cargo-body{max-height:none}.dp-simple-layout .dp-candidates{max-height:50vh}}
 .dp-day-field{display:flex!important;align-items:center;gap:8px;margin-top:10px;font-size:11px!important}.dp-day-field input{width:145px!important;margin:0!important;padding:7px 8px!important}.dp-schedule-wrap{overflow:auto;border:1px solid var(--dp-border);border-radius:9px;background:#fff;margin-top:10px}.dp-schedule{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:11px;line-height:1.25;font-variant-numeric:tabular-nums}.dp-schedule th,.dp-schedule td{border-right:1px solid #e2e6eb;border-bottom:1px solid #e2e6eb;padding:6px 7px;text-align:right;white-space:nowrap;height:31px;background:#fff}.dp-schedule thead th{position:sticky;top:0;z-index:5;background:#f1f3f6;color:#3d4652;text-align:center;font-size:10px;white-space:normal;vertical-align:bottom}.dp-schedule .dp-col-city{width:82px;min-width:82px;max-width:82px;text-align:left;overflow:hidden;text-overflow:ellipsis}.dp-schedule .dp-col-client{width:170px;min-width:170px;max-width:170px;text-align:left;white-space:normal}.dp-schedule .dp-col-order{width:72px;min-width:72px;max-width:72px;text-align:left}.dp-schedule .dp-col-date{width:76px;min-width:76px;text-align:center}.dp-schedule .dp-col-vendor{width:125px;min-width:125px;max-width:125px;text-align:left;white-space:normal}.dp-schedule .dp-col-product{width:78px;min-width:68px;max-width:90px;text-align:center;white-space:normal;overflow-wrap:anywhere}.dp-schedule .dp-col-weight{width:82px;min-width:82px}.dp-schedule .dp-sticky-city{position:sticky;left:0;z-index:3}.dp-schedule .dp-sticky-client{position:sticky;left:82px;z-index:3}.dp-schedule .dp-sticky-order{position:sticky;left:252px;z-index:3}.dp-schedule thead .dp-sticky-city,.dp-schedule thead .dp-sticky-client,.dp-schedule thead .dp-sticky-order{z-index:7}.dp-schedule .dp-day-row th{background:#27313c;color:#fff;text-align:left;font-size:11px;letter-spacing:.25px;padding:7px 9px}.dp-schedule .dp-stock-row td{background:#f5f6f8;font-weight:700}.dp-schedule .dp-stock-final td{background:#eceff2;border-bottom:2px solid #6d7782}.dp-schedule .dp-stock-label{text-align:left!important}.dp-schedule .dp-stock-negative{background:#fde7e5!important;color:#a42419;font-weight:800}.dp-schedule .dp-client-row:hover td{background:#fffaf3}.dp-schedule .dp-client-row:hover .dp-sticky-city,.dp-schedule .dp-client-row:hover .dp-sticky-client,.dp-schedule .dp-client-row:hover .dp-sticky-order{background:#fffaf3}.dp-schedule-note{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin:4px 0 8px}.dp-schedule-note b{font-size:12px}.dp-simple-summary.dp-schedule-panel{position:static}.dp-simple-summary.dp-schedule-panel .dp-cargo-body{max-height:none}.dp-layout.dp-schedule-layout{grid-template-columns:minmax(320px,.72fr) minmax(0,1.5fr)}
+.dp-weekbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;background:#fffaf3;border-bottom:1px solid var(--dp-border);flex-wrap:wrap}.dp-weekbar label{display:flex;align-items:center;gap:9px;font-size:12px}.dp-weekbar input{width:145px!important;margin:0!important;padding:7px 8px!important}.dp-weekbar strong{font-size:12px}.dp-day-field select{width:170px!important;margin:0!important;padding:7px 8px!important}
 @media(max-width:1180px){.dp-layout.dp-schedule-layout{grid-template-columns:1fr}}
 @media(max-width:600px){.dp-schedule .dp-col-city{width:65px;min-width:65px;max-width:65px}.dp-schedule .dp-col-client{width:140px;min-width:140px;max-width:140px}.dp-schedule .dp-col-order{width:68px;min-width:68px;max-width:68px}.dp-schedule .dp-sticky-client{left:65px}.dp-schedule .dp-sticky-order{left:205px}.dp-schedule th,.dp-schedule td{padding:5px 6px}.dp-day-field{justify-content:space-between}}
 
@@ -5297,9 +5298,14 @@ const dpEscape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','
 const dpDate=v=>{const s=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s.split('-').reverse().join('/'):'Sin fecha';};
 const dpExcelDate=v=>{const day=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(day)?{t:'n',v:(Date.parse(day+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000,z:'dd/mm/yyyy'}:'';};
 const dpQty=n=>Number(n||0).toLocaleString('es-EC',{maximumFractionDigits:2});
+const dpISODate=d=>[d.getUTCFullYear(),String(d.getUTCMonth()+1).padStart(2,'0'),String(d.getUTCDate()).padStart(2,'0')].join('-');
+function dpWeekStart(value){const d=new Date(String(value||hoyISO()).slice(0,10)+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));return dpISODate(d);}
+function dpWeekDays(value){const first=new Date(dpWeekStart(value)+'T12:00:00Z');return Array.from({length:6},(_,i)=>{const d=new Date(first);d.setUTCDate(first.getUTCDate()+i);return dpISODate(d);});}
+function dpShortDay(value){return new Date(value+'T12:00:00Z').toLocaleDateString('es-EC',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'}).replace(/\./g,'');}
 const dpStatus={BORRADOR:'Borrador',PLANIFICADO:'Planificado',CERRADO:'Cerrado',CANCELADO:'Cancelado',POR_FACTURAR:'Por facturar',POR_DESPACHAR:'Listo para despacho',EN_TRANSITO:'En tránsito',ENTREGADO:'Entregado',REVISAR:'Revisar pedido'};
 const dpWritable=()=>!!DP.data&&!DP.documentBusy;
-function dpNewDraft(){return {nombre:'Carga '+dpDate(hoyISO()),fecha_salida:hoyISO(),vehiculo:'',conductor:'',capacidad_kg:'',costo_estimado:'',observaciones:'',estado:'BORRADOR',paradas:[],operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'plan-'+Date.now()+'-'+Math.random().toString(36).slice(2)};}
+function dpNewDraft(){const week=dpWeekStart(hoyISO());return {nombre:'Semana '+dpDate(week),fecha_salida:week,vehiculo:'',conductor:'',capacidad_kg:'',costo_estimado:'',observaciones:'',estado:'BORRADOR',paradas:[],operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'plan-'+Date.now()+'-'+Math.random().toString(36).slice(2)};}
+function dpDefaultDispatchDate(){const days=dpWeekDays(DP.draft?.fecha_salida),today=hoyISO();return days.includes(today)?today:days[0];}
 function dpRefresh(){if(currentView==='planificador-despachos'){const el=document.getElementById('dpRoot');if(el)el.innerHTML=dpBody();}}
 async function dpLoad(){
   if(DP.loading||DP.saving)return;
@@ -5320,6 +5326,12 @@ function dpDraftChange(field,value){
   const label=document.getElementById('dpSaveState');if(label)label.textContent='Cambios sin guardar';
   dpUpdateWeights();
 }
+function dpSetWeek(value){
+  if(!dpWritable()||DP.saving||!/^\d{4}-\d{2}-\d{2}$/.test(value))return;
+  const week=dpWeekStart(value),days=dpWeekDays(week);DP.draft.fecha_salida=week;DP.draft.nombre='Semana '+dpDate(week);
+  DP.draft.paradas.forEach(stop=>{if(!days.includes(stop.dispatchDate))stop.dispatchDate=days[0];});
+  DP.dirty=true;DP.message='';DP.error='';dpRefresh();
+}
 function dpDiscardOK(){return !DP.dirty||confirm('Hay cambios sin guardar en esta carga. ¿Quieres descartarlos?');}
 function dpNew(){if(DP.saving||DP.documentBusy)return;DP.draft=dpNewDraft();DP.dirty=false;DP.error='';DP.message='Selección borrada. Puedes empezar otra.';DP.query='';DP.city='';DP.sector='';DP.until='';DP.kind='';dpRefresh();}
 function dpFilter(field,value){if(!['query','city','sector','until','kind'].includes(field))return;DP[field]=value;const list=document.getElementById('dpCandidates');if(list)list.innerHTML=dpCandidatesHTML();}
@@ -5330,7 +5342,7 @@ function dpSelect(key){
   const s=dpCandidates().find(s=>s.key===key);if(!s||s.blocked)return;
   const items=s.items.filter(i=>i.available>0).map(i=>({name:i.name,qty:i.available}));
   if(!items.length){DP.error='Este pedido no tiene cantidades pendientes disponibles.';dpRefresh();return;}
-  DP.draft.paradas.push({...s,items,dispatchDate:DP.draft.fecha_salida||hoyISO()});DP.dirty=true;DP.message='';DP.error='';dpRefresh();
+  DP.draft.paradas.push({...s,items,dispatchDate:dpDefaultDispatchDate()});DP.dirty=true;DP.message='';DP.error='';dpRefresh();
 }
 function dpRemove(index){if(!dpWritable()||DP.saving)return;DP.draft.paradas.splice(index,1);DP.dirty=true;DP.message='';dpRefresh();}
 function dpMove(index,step){if(!dpWritable()||DP.saving)return;const next=index+step;if(next<0||next>=DP.draft.paradas.length)return;const p=DP.draft.paradas;[p[index],p[next]]=[p[next],p[index]];DP.dirty=true;dpRefresh();}
@@ -5343,7 +5355,7 @@ function dpQuantity(stopIndex,itemIndex,value){
   dpUpdateWeights();
 }
 function dpDispatchDate(stopIndex,value){
-  if(!dpWritable()||DP.saving||!/^\d{4}-\d{2}-\d{2}$/.test(value))return;
+  if(!dpWritable()||DP.saving||!dpWeekDays(DP.draft.fecha_salida).includes(value))return;
   const stop=DP.draft.paradas[stopIndex];if(!stop)return;
   stop.dispatchDate=value;DP.dirty=true;DP.message='';DP.error='';
   const summary=document.getElementById('dpSummary');if(summary)summary.innerHTML=dpSummaryHTML();
@@ -5359,7 +5371,7 @@ function dpOrderTotals(stops){
 function dpScheduleOrders(stops){
   const groups=new Map();
   (stops||[]).forEach(stop=>{
-    const day=String(stop.dispatchDate||DP.draft?.fecha_salida||hoyISO()).slice(0,10),key=day+'|'+String(stop.orderId);
+    const day=String(stop.dispatchDate||dpDefaultDispatchDate()).slice(0,10),key=day+'|'+String(stop.orderId);
     if(!groups.has(key))groups.set(key,{...stop,dispatchDate:day,items:[],invoices:[]});
     const row=groups.get(key),items=new Map(row.items.map(i=>[i.name,Number(i.qty)||0]));
     stop.items.forEach(i=>items.set(i.name,CandyPlanner.round((items.get(i.name)||0)+(Number(i.qty)||0))));
@@ -5367,11 +5379,11 @@ function dpScheduleOrders(stops){
   });
   return [...groups.values()].map(row=>({...row,...dpWeightOf([row])})).sort((a,b)=>a.dispatchDate.localeCompare(b.dispatchDate)||a.client.localeCompare(b.client,'es')||String(a.orderId).localeCompare(String(b.orderId),'es'));
 }
-function dpSchedule(stops=DP.draft?.paradas||[],data=DP.data){
+function dpSchedule(stops=DP.draft?.paradas||[],data=DP.data,weekStart=DP.draft?.fecha_salida||hoyISO()){
   const orders=dpScheduleOrders(stops),products=[...new Set(orders.flatMap(o=>o.items.filter(i=>Number(i.qty)>0).map(i=>i.name)))].sort((a,b)=>a.localeCompare(b,'es'));
   const stock=new Map(products.map(name=>[name,CandyPlanner.round((data?.inventory||[]).filter(i=>i.tipo==='producto_terminado'&&i.nombre===name).reduce((sum,i)=>sum+(Number(i.stock)||0),0))]));
   const days=[];
-  [...new Set(orders.map(o=>o.dispatchDate))].sort().forEach(date=>{
+  dpWeekDays(weekStart).forEach(date=>{
     const rows=orders.filter(o=>o.dispatchDate===date),initial=new Map(stock),demand=new Map(products.map(name=>[name,0]));
     rows.forEach(o=>o.items.forEach(i=>demand.set(i.name,CandyPlanner.round((demand.get(i.name)||0)+(Number(i.qty)||0)))));
     products.forEach(name=>stock.set(name,CandyPlanner.round((stock.get(name)||0)-(demand.get(name)||0))));
@@ -5398,7 +5410,7 @@ function dpSelectVisible(){
   dpFilteredCandidates().forEach(s=>{
     if(DP.draft.paradas.some(p=>p.key===s.key)||s.blocked||!s.items.some(i=>i.available>0))return;
     if(DP.draft.paradas.length>=250){skipped++;return;}
-    DP.draft.paradas.push({...s,items:s.items.filter(i=>i.available>0).map(i=>({name:i.name,qty:i.available})),dispatchDate:DP.draft.fecha_salida||hoyISO()});DP.dirty=true;
+    DP.draft.paradas.push({...s,items:s.items.filter(i=>i.available>0).map(i=>({name:i.name,qty:i.available})),dispatchDate:dpDefaultDispatchDate()});DP.dirty=true;
   });
   DP.error=skipped?'El máximo es 250 selecciones. Los pedidos adicionales quedaron sin marcar.':'';DP.message='';dpRefresh();
 }
@@ -5417,7 +5429,7 @@ function dpCandidatesHTML(){
     <div class="dp-products">${stop.items.map((it,j)=>`<div><span>${dpEscape(it.name)}</span>${selected&&stop.kind==='pendiente'&&dpWritable()?`<input class="dp-simple-qty" aria-label="Cantidad de ${dpEscape(it.name)} para ${dpEscape(s.orderId)}" type="number" min="0" step="0.01" value="${dpEscape(it.qty)}" ${source?'max="'+dpEscape(source.items.find(x=>x.name===it.name)?.available??0)+'"':''} oninput="dpQuantity(${index},${j},this.value)">`:`<b>${dpQty(it.qty)}</b>`}</div>`).join('')}</div>
     ${s.blocked?`<p class="dp-alert dp-alert-bad">${dpEscape(s.blocked)}</p>`:''}
     ${info?.changed?'<p class="dp-alert dp-alert-bad">Este pedido cambió. Desmárcalo y vuelve a seleccionarlo con sus datos actuales.</p>':''}
-    ${selected?`<label class="dp-day-field">Día de despacho<input type="date" min="${hoyISO()}" value="${dpEscape(stop.dispatchDate||DP.draft.fecha_salida||hoyISO())}" onchange="dpDispatchDate(${index},this.value)"></label>`:''}
+    ${selected?`<label class="dp-day-field">Día de despacho<select onchange="dpDispatchDate(${index},this.value)">${dpWeekDays(DP.draft.fecha_salida).map(day=>`<option value="${day}" ${stop.dispatchDate===day?'selected':''}>${dpEscape(dpShortDay(day))}</option>`).join('')}</select></label>`:''}
     ${selected&&stop.kind!=='pendiente'?'<p class="dp-muted">La entrega facturada se incluye completa.</p>':''}
     ${!selected&&!s.items.some(i=>i.available>0)?'<p class="dp-muted">Sin cantidades pendientes.</p>':''}</article>`;
   };
@@ -5447,7 +5459,7 @@ function dpBody(){
     <label>Ciudad<select onchange="dpFilter('city',this.value)"><option value="">Todas</option>${opts('city').map(x=>`<option value="${dpEscape(x)}" ${DP.city===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
     <label>Sector<select onchange="dpFilter('sector',this.value)"><option value="">Todos</option>${opts('sector').map(x=>`<option value="${dpEscape(x)}" ${DP.sector===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
     <label>Entrega hasta<input type="date" value="${dpEscape(DP.until)}" onchange="dpFilter('until',this.value)"></label><label>Estado<select onchange="dpFilter('kind',this.value)"><option value="">Todos</option><option value="POR_FACTURAR" ${DP.kind==='POR_FACTURAR'?'selected':''}>Por facturar</option><option value="POR_DESPACHAR" ${DP.kind==='POR_DESPACHAR'?'selected':''}>Listo para despacho</option></select></label></div><div id="dpCandidates" class="dp-candidates">${dpCandidatesHTML()}</div></section>
-    <section class="dp-panel dp-simple-summary dp-schedule-panel"><div class="dp-panel-head"><h2>Despachos por cliente</h2><p>Cada cliente ocupa una fila y los productos usan únicamente el ancho necesario.</p></div><div class="dp-footer"><button class="btn btn-gold" onclick="dpExport()" ${d.paradas.length&&!busy?'':'disabled'}>Descargar Excel</button><button class="btn" onclick="dpPrint()" ${d.paradas.length&&!busy?'':'disabled'}>Hoja de ruta / PDF</button></div><div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div></div><p class="dp-muted dp-updated">Selección temporal: descarga tus documentos y pulsa Borrar selección para empezar otra. No cambia pedidos ni inventario.<br>Inventario consultado: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}</p></section></div>`;
+    <section class="dp-panel dp-simple-summary dp-schedule-panel"><div class="dp-panel-head"><h2>Despachos por cliente</h2><p>Cada cliente ocupa una fila y los productos usan únicamente el ancho necesario.</p></div><div class="dp-weekbar"><label>Semana de despachos<input type="date" value="${dpEscape(d.fecha_salida)}" onchange="dpSetWeek(this.value)" ${busy?'disabled':''}></label><strong>${dpEscape(dpShortDay(dpWeekDays(d.fecha_salida)[0]))} — ${dpEscape(dpShortDay(dpWeekDays(d.fecha_salida)[5]))}</strong></div><div class="dp-footer"><button class="btn btn-gold" onclick="dpExport()" ${d.paradas.length&&!busy?'':'disabled'}>Descargar Excel</button><button class="btn" onclick="dpPrint()" ${d.paradas.length&&!busy?'':'disabled'}>Hoja de ruta / PDF</button></div><div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div></div><p class="dp-muted dp-updated">Selección temporal: descarga tus documentos y pulsa Borrar selección para empezar otra. No cambia pedidos ni inventario.<br>Inventario consultado: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}</p></section></div>`;
 }
 
 async function dpDocument(){
