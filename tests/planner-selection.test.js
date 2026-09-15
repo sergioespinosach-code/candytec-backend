@@ -68,6 +68,17 @@ test('consulta permite calcular sin guardar y borrar vacía la selección sin es
   dp.city='Quito';ctx.dpNew();assert.equal(dp.draft.paradas.length,0);assert.equal(dp.city,'');assert.equal(ctx.dpSummary().knownKg,0);
   ctx.dpSelect('P1:pendiente');await ctx.dpDocument();assert.equal(dp.draft.id,undefined);
 });
+test('la matriz separa clientes por día y arrastra el inventario final',()=>{
+  const {ctx,data}=setup();data.inventory=[{tipo:'producto_terminado',nombre:'YumYum',stock:14},{tipo:'producto_terminado',nombre:'Cream',stock:5}];
+  ctx.dpSelect('P1:pendiente');ctx.dpSelect('P2:pendiente');ctx.dpDispatchDate(1,'2026-09-09');
+  const plan=ctx.dpSchedule();assert.equal(plan.days.length,2);assert.equal(plan.days[0].rows[0].client,'Norte <b>');assert.equal(plan.days[0].final.get('YumYum'),4);
+  assert.equal(plan.days[1].initial.get('YumYum'),4);assert.equal(plan.days[1].final.get('YumYum'),-2);
+  const rendered=ctx.dpSummaryHTML();assert.match(rendered,/Norte &lt;b&gt;/);assert.match(rendered,/Sur/);assert.match(rendered,/dp-stock-negative/);
+});
+test('la fecha elegida de despacho se conserva al validar el documento',async()=>{
+  const {ctx,dp}=setup();ctx.dpSelect('P1:pendiente');ctx.dpDispatchDate(0,'2026-09-12');
+  const doc=await ctx.dpDocument();assert.equal(doc.d.paradas[0].dispatchDate,'2026-09-12');assert.equal(dp.draft.paradas[0].dispatchDate,'2026-09-12');
+});
 test('el HTML conserva sintaxis válida en todos sus scripts',()=>{
   for(const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g))new vm.Script(match[1]);
 });
