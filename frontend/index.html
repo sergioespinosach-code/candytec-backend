@@ -417,6 +417,11 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
 @media(max-width:1180px){.dp-layout.dp-schedule-layout{grid-template-columns:1fr}}
 @media(max-width:600px){.dp-schedule .dp-col-city{width:65px;min-width:65px;max-width:65px}.dp-schedule .dp-col-client{width:140px;min-width:140px;max-width:140px}.dp-schedule .dp-col-order{width:68px;min-width:68px;max-width:68px}.dp-schedule .dp-sticky-client{left:65px}.dp-schedule .dp-sticky-order{left:205px}.dp-schedule th,.dp-schedule td{padding:5px 6px}.dp-day-field{justify-content:space-between}}
 
+/* Calendario semanal arrastrable, con la misma lectura horizontal de la hoja Excel. */
+.dp-layout.dp-drag-layout{grid-template-columns:310px minmax(0,1fr);gap:14px}.dp-pending-panel{position:sticky;top:14px;max-height:calc(100vh - 28px);display:flex;flex-direction:column}.dp-pending-panel .dp-panel-head{padding:16px}.dp-pending-panel .dp-filters{grid-template-columns:1fr;padding:13px;gap:9px}.dp-pending-panel .dp-candidates{padding:0 13px 13px;max-height:none;overflow:auto}.dp-pending-card{padding:12px;border:1px solid var(--dp-border);border-radius:9px;margin-bottom:9px;background:#fff;cursor:grab;box-shadow:0 1px 2px rgba(20,30,40,.04);transition:border-color .15s,box-shadow .15s,transform .15s}.dp-pending-card:hover{border-color:#c46a55;box-shadow:0 3px 10px rgba(66,39,30,.09);transform:translateY(-1px)}.dp-pending-card:active{cursor:grabbing}.dp-pending-card.dp-dragging{opacity:.45}.dp-pending-card[aria-disabled="true"]{cursor:not-allowed;background:#f6f7f8;box-shadow:none;transform:none}.dp-pending-card-head{display:flex;justify-content:space-between;gap:8px;align-items:start}.dp-pending-card-head strong{font-size:13px;line-height:1.3}.dp-pending-card-head span{font-size:10.5px;color:var(--dp-muted);white-space:nowrap}.dp-pending-card .dp-products{margin:8px 0 0;padding-top:6px}.dp-pending-card .dp-products>div{font-size:11px;padding:2px 0}.dp-drag-hint{display:flex;align-items:center;gap:6px;margin-top:8px;color:#9b3725;font-size:10.5px;font-weight:700}.dp-touch-assign{display:none;margin-top:9px;gap:6px}.dp-touch-assign select{min-width:0;flex:1;border:1px solid #c6ced8;border-radius:6px;padding:7px;background:#fff;font-size:12px}.dp-calendar-panel .dp-panel-head{padding:16px 18px}.dp-calendar-panel .dp-cargo-body{padding:0 14px 14px}.dp-week-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dp-week-actions .btn{padding:7px 10px;min-height:34px}.dp-schedule .dp-day-row th{position:relative;background:#27313c;transition:background .15s,box-shadow .15s}.dp-schedule .dp-day-row th::after{content:'Arrastra aquí';float:right;color:#d9e0e6;font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;margin-left:12px}.dp-schedule .dp-day-row.dp-drop-active th{background:#a93b28;box-shadow:inset 0 0 0 3px #f4c5b9}.dp-schedule .dp-day-row.dp-drop-active th::after{content:'Suelta el pedido';color:#fff}.dp-schedule .dp-client-row{cursor:grab}.dp-schedule .dp-client-row.dp-dragging{opacity:.42}.dp-schedule .dp-client-row td{transition:background .12s}.dp-order-cell{display:flex;align-items:center;justify-content:space-between;gap:4px}.dp-order-cell span{overflow:hidden;text-overflow:ellipsis}.dp-row-remove{border:0;background:transparent;color:#8f2f20;width:23px;height:23px;border-radius:5px;padding:0;line-height:1;font-size:18px;cursor:pointer;flex-shrink:0}.dp-row-remove:hover{background:#fde7e1}.dp-cell-qty{width:58px;min-width:52px;max-width:66px;border:1px solid #ccd3db;border-radius:4px;background:#fff;padding:4px 5px;text-align:right;font:inherit;font-weight:700;color:#17212c;box-sizing:border-box}.dp-cell-qty:focus{border-color:#a93b28}.dp-no-orders td{background:#fafbfc;color:#7a828d;text-align:center!important;font-style:italic;height:38px}.dp-pending-count{font-size:11.5px;color:var(--dp-muted);padding:7px 0 10px}.dp-calendar-empty{margin:8px 0 10px;padding:9px 11px;border-radius:7px;background:#f4f6f8;color:#59616c;font-size:11.5px}.dp-schedule .dp-col-product{width:auto;min-width:68px;max-width:94px}.dp-schedule .dp-col-client{width:155px;min-width:155px;max-width:155px}.dp-schedule .dp-sticky-order{left:237px}.dp-schedule .dp-col-order{width:83px;min-width:83px;max-width:83px}
+@media(max-width:1180px){.dp-layout.dp-drag-layout{grid-template-columns:1fr}.dp-pending-panel{position:static;max-height:none}.dp-pending-panel .dp-candidates{max-height:410px}.dp-touch-assign{display:flex}.dp-drag-hint{display:none}}
+@media(max-width:600px){.dp-pending-panel .dp-candidates{max-height:360px}.dp-calendar-panel .dp-cargo-body{padding:0 9px 10px}.dp-weekbar{padding:10px}.dp-week-actions{width:100%}.dp-week-actions label{flex:1}.dp-week-actions input{width:100%!important}.dp-schedule .dp-col-client{width:130px;min-width:130px;max-width:130px}.dp-schedule .dp-sticky-order{left:195px}.dp-schedule .dp-col-order{width:78px;min-width:78px;max-width:78px}.dp-schedule .dp-day-row th::after{content:'Soltar aquí'}}
+
 </style>
 <script>
 /* BEGIN ORDER FINANCE CORE */
@@ -5332,18 +5337,24 @@ function dpSetWeek(value){
   DP.draft.paradas.forEach(stop=>{if(!days.includes(stop.dispatchDate))stop.dispatchDate=days[0];});
   DP.dirty=true;DP.message='';DP.error='';dpRefresh();
 }
+function dpShiftWeek(offset){
+  if(!Number.isInteger(offset)||Math.abs(offset)>1)return;
+  const date=new Date(dpWeekStart(DP.draft?.fecha_salida)+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+offset*7);dpSetWeek(dpISODate(date));
+}
 function dpDiscardOK(){return !DP.dirty||confirm('Hay cambios sin guardar en esta carga. ¿Quieres descartarlos?');}
-function dpNew(){if(DP.saving||DP.documentBusy)return;DP.draft=dpNewDraft();DP.dirty=false;DP.error='';DP.message='Selección borrada. Puedes empezar otra.';DP.query='';DP.city='';DP.sector='';DP.until='';DP.kind='';dpRefresh();}
+function dpNew(){if(DP.saving||DP.documentBusy)return;DP.draft=dpNewDraft();DP.dirty=false;DP.error='';DP.message='Calendario borrado. Todos los pedidos volvieron a pendientes.';DP.query='';DP.city='';DP.sector='';DP.until='';DP.kind='';dpRefresh();}
 function dpFilter(field,value){if(!['query','city','sector','until','kind'].includes(field))return;DP[field]=value;const list=document.getElementById('dpCandidates');if(list)list.innerHTML=dpCandidatesHTML();}
 function dpCandidates(){return CandyPlanner.candidates(DP.data?.sources,[]);}
-function dpSelect(key){
+function dpAddToDay(key,date){
   if(!dpWritable()||DP.saving||DP.draft.paradas.some(s=>s.key===key))return;
+  if(!dpWeekDays(DP.draft.fecha_salida).includes(date)){DP.error='Elige un día de la semana visible.';dpRefresh();return;}
   if(DP.draft.paradas.length>=250){DP.error='Puedes seleccionar hasta 250 pedidos o entregas a la vez.';dpRefresh();return;}
   const s=dpCandidates().find(s=>s.key===key);if(!s||s.blocked)return;
   const items=s.items.filter(i=>i.available>0).map(i=>({name:i.name,qty:i.available}));
   if(!items.length){DP.error='Este pedido no tiene cantidades pendientes disponibles.';dpRefresh();return;}
-  DP.draft.paradas.push({...s,items,dispatchDate:dpDefaultDispatchDate()});DP.dirty=true;DP.message='';DP.error='';dpRefresh();
+  DP.draft.paradas.push({...s,items,dispatchDate:date});DP.dirty=true;DP.message='Pedido agregado a '+dpShortDay(date)+'.';DP.error='';dpRefresh();
 }
+function dpSelect(key){dpAddToDay(key,dpDefaultDispatchDate());}
 function dpRemove(index){if(!dpWritable()||DP.saving)return;DP.draft.paradas.splice(index,1);DP.dirty=true;DP.message='';dpRefresh();}
 function dpMove(index,step){if(!dpWritable()||DP.saving)return;const next=index+step;if(next<0||next>=DP.draft.paradas.length)return;const p=DP.draft.paradas;[p[index],p[next]]=[p[next],p[index]];DP.dirty=true;dpRefresh();}
 function dpQuantity(stopIndex,itemIndex,value){
@@ -5360,6 +5371,31 @@ function dpDispatchDate(stopIndex,value){
   stop.dispatchDate=value;DP.dirty=true;DP.message='';DP.error='';
   const summary=document.getElementById('dpSummary');if(summary)summary.innerHTML=dpSummaryHTML();
 }
+function dpMoveScheduledOrder(orderId,fromDate,toDate){
+  if(!dpWritable()||DP.saving||!dpWeekDays(DP.draft.fecha_salida).includes(toDate))return;
+  let moved=false;DP.draft.paradas.forEach(stop=>{if(String(stop.orderId)===String(orderId)&&stop.dispatchDate===fromDate){stop.dispatchDate=toDate;moved=true;}});
+  if(!moved)return;DP.dirty=true;DP.error='';DP.message='Pedido movido a '+dpShortDay(toDate)+'.';dpRefresh();
+}
+function dpRemoveScheduledOrder(orderId,date){
+  if(!dpWritable()||DP.saving)return;
+  const before=DP.draft.paradas.length;DP.draft.paradas=DP.draft.paradas.filter(stop=>!(String(stop.orderId)===String(orderId)&&stop.dispatchDate===date));
+  if(before===DP.draft.paradas.length)return;DP.dirty=true;DP.error='';DP.message='Pedido devuelto a pendientes.';dpRefresh();
+}
+function dpDragPayload(event,payload){
+  if(!dpWritable()||DP.saving||!event.dataTransfer)return false;
+  event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',JSON.stringify(payload));event.currentTarget?.classList.add('dp-dragging');return true;
+}
+function dpDragCandidate(event,key){if(!dpDragPayload(event,{type:'candidate',key}))event.preventDefault();}
+function dpDragScheduled(event,orderId,date){if(!dpDragPayload(event,{type:'scheduled',orderId,date}))event.preventDefault();}
+function dpDragEnd(event){event.currentTarget?.classList.remove('dp-dragging');document.querySelectorAll('.dp-drop-active').forEach(el=>el.classList.remove('dp-drop-active'));}
+function dpDragOverDay(event){if(!dpWritable()||DP.saving)return;event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='move';event.currentTarget.classList.add('dp-drop-active');}
+function dpDragLeaveDay(event){if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.classList.remove('dp-drop-active');}
+function dpDropOnDay(event,date){
+  event.preventDefault();event.currentTarget.classList.remove('dp-drop-active');
+  let payload;try{payload=JSON.parse(event.dataTransfer?.getData('text/plain')||'');}catch(_){return;}
+  if(payload?.type==='candidate'&&typeof payload.key==='string')dpAddToDay(payload.key,date);
+  else if(payload?.type==='scheduled'&&payload.orderId!=null&&typeof payload.date==='string')dpMoveScheduledOrder(payload.orderId,payload.date,date);
+}
 function dpSummary(){return CandyPlanner.summarize(DP.draft?.paradas,DP.data?.catalog,DP.data?.inventory,[],null,DP.data?.sources);}
 /* Selección rápida: utiliza las mismas reglas de disponibilidad del servidor. */
 function dpWeightOf(stops){return CandyPlanner.summarize(stops,DP.data?.catalog,[],[],null,[]);}
@@ -5370,17 +5406,17 @@ function dpOrderTotals(stops){
 }
 function dpScheduleOrders(stops){
   const groups=new Map();
-  (stops||[]).forEach(stop=>{
+  (stops||[]).forEach((stop,stopIndex)=>{
     const day=String(stop.dispatchDate||dpDefaultDispatchDate()).slice(0,10),key=day+'|'+String(stop.orderId);
-    if(!groups.has(key))groups.set(key,{...stop,dispatchDate:day,items:[],invoices:[]});
+    if(!groups.has(key))groups.set(key,{...stop,dispatchDate:day,items:[],invoices:[],stopIndexes:[]});
     const row=groups.get(key),items=new Map(row.items.map(i=>[i.name,Number(i.qty)||0]));
     stop.items.forEach(i=>items.set(i.name,CandyPlanner.round((items.get(i.name)||0)+(Number(i.qty)||0))));
-    row.items=[...items].map(([name,qty])=>({name,qty}));if(stop.invoice&&!row.invoices.includes(stop.invoice))row.invoices.push(stop.invoice);
+    row.items=[...items].map(([name,qty])=>({name,qty}));row.stopIndexes.push(stopIndex);if(stop.invoice&&!row.invoices.includes(stop.invoice))row.invoices.push(stop.invoice);
   });
   return [...groups.values()].map(row=>({...row,...dpWeightOf([row])})).sort((a,b)=>a.dispatchDate.localeCompare(b.dispatchDate)||a.client.localeCompare(b.client,'es')||String(a.orderId).localeCompare(String(b.orderId),'es'));
 }
 function dpSchedule(stops=DP.draft?.paradas||[],data=DP.data,weekStart=DP.draft?.fecha_salida||hoyISO()){
-  const orders=dpScheduleOrders(stops),products=[...new Set(orders.flatMap(o=>o.items.filter(i=>Number(i.qty)>0).map(i=>i.name)))].sort((a,b)=>a.localeCompare(b,'es'));
+  const orders=dpScheduleOrders(stops),products=[...new Set([...(data?.catalog||[]).map(p=>p.nombre).filter(Boolean),...orders.flatMap(o=>o.items.filter(i=>Number(i.qty)>0).map(i=>i.name))])].sort((a,b)=>a.localeCompare(b,'es'));
   const stock=new Map(products.map(name=>[name,CandyPlanner.round((data?.inventory||[]).filter(i=>i.tipo==='producto_terminado'&&i.nombre===name).reduce((sum,i)=>sum+(Number(i.stock)||0),0))]));
   const days=[];
   dpWeekDays(weekStart).forEach(date=>{
@@ -5415,51 +5451,51 @@ function dpSelectVisible(){
   DP.error=skipped?'El máximo es 250 selecciones. Los pedidos adicionales quedaron sin marcar.':'';DP.message='';dpRefresh();
 }
 function dpCandidatesHTML(){
-  const list=dpFilteredCandidates(),keys=new Set(list.map(s=>s.key)),byKey=new Map(dpCandidates().map(s=>[s.key,s]));
-  // Keep selected items visible even when filters change or a source disappears.
-  const outside=DP.draft.paradas.filter(p=>!keys.has(p.key));
+  const selected=new Set(DP.draft.paradas.map(p=>p.key)),list=dpFilteredCandidates().filter(s=>!selected.has(s.key));
   const row=s=>{
-    const index=DP.draft.paradas.findIndex(p=>p.key===s.key),selected=index>=0;
-    const source=byKey.get(s.key),stop=selected?DP.draft.paradas[index]:{...s,items:s.items.map(i=>({name:i.name,qty:i.available??i.qty}))};
-    const info=selected?CandyPlanner.issues({paradas:[stop]},DP.data.sources)[0]:null;
-    const canToggle=dpWritable()&&!DP.saving&&(selected||(!s.blocked&&s.items.some(i=>i.available>0)));
+    const stop={...s,items:s.items.map(i=>({name:i.name,qty:i.available??i.qty}))},canAdd=dpWritable()&&!DP.saving&&!s.blocked&&s.items.some(i=>i.available>0);
     const weight=dpWeightOf([stop]);
-    return `<article class="dp-candidate ${selected?'dp-selected':''}"><div class="dp-row"><label class="dp-check"><input type="checkbox" ${selected?'checked':''} ${canToggle?'':'disabled'} data-dp-key="${dpEscape(s.key)}" onchange="dpToggle(this.dataset.dpKey,this.checked)" aria-label="Seleccionar ${dpEscape(s.orderId)} ${dpEscape(s.client)}"><span><b>${dpEscape(s.client)}</b><small>${dpEscape(s.orderId)}${s.invoice?' · Factura '+dpEscape(s.invoice):' · Por facturar'}</small></span></label><strong ${selected?'id="dpWeight-'+index+'"':''}>${dpWeightLabel(weight)}</strong></div>
-    <div class="dp-muted">${dpEscape(s.city||'Sin ciudad')} · ${dpEscape(s.sector||'Sin sector')} · Entrega ${dpDate(s.dueDate)}</div><div class="dp-muted">${dpEscape(s.address||'Sin dirección')} · ${dpEscape(s.vendor)}</div>
-    <div class="dp-products">${stop.items.map((it,j)=>`<div><span>${dpEscape(it.name)}</span>${selected&&stop.kind==='pendiente'&&dpWritable()?`<input class="dp-simple-qty" aria-label="Cantidad de ${dpEscape(it.name)} para ${dpEscape(s.orderId)}" type="number" min="0" step="0.01" value="${dpEscape(it.qty)}" ${source?'max="'+dpEscape(source.items.find(x=>x.name===it.name)?.available??0)+'"':''} oninput="dpQuantity(${index},${j},this.value)">`:`<b>${dpQty(it.qty)}</b>`}</div>`).join('')}</div>
+    return `<article class="dp-pending-card" draggable="${canAdd?'true':'false'}" aria-disabled="${canAdd?'false':'true'}" data-dp-key="${dpEscape(s.key)}" ondragstart="dpDragCandidate(event,this.dataset.dpKey)" ondragend="dpDragEnd(event)"><div class="dp-pending-card-head"><strong>${dpEscape(s.client)}</strong><span>${dpWeightLabel(weight)}</span></div>
+    <div class="dp-muted">${dpEscape(s.orderId)}${s.invoice?' · Factura '+dpEscape(s.invoice):' · Por facturar'}<br>${dpEscape(s.city||'Sin ciudad')} · ${dpEscape(s.vendor||'Sin vendedor')} · ${dpDate(s.dueDate)}</div>
+    <div class="dp-products">${stop.items.filter(it=>Number(it.qty)>0).map(it=>`<div><span>${dpEscape(it.name)}</span><b>${dpQty(it.qty)}</b></div>`).join('')}</div>
     ${s.blocked?`<p class="dp-alert dp-alert-bad">${dpEscape(s.blocked)}</p>`:''}
-    ${info?.changed?'<p class="dp-alert dp-alert-bad">Este pedido cambió. Desmárcalo y vuelve a seleccionarlo con sus datos actuales.</p>':''}
-    ${selected?`<label class="dp-day-field">Día de despacho<select onchange="dpDispatchDate(${index},this.value)">${dpWeekDays(DP.draft.fecha_salida).map(day=>`<option value="${day}" ${stop.dispatchDate===day?'selected':''}>${dpEscape(dpShortDay(day))}</option>`).join('')}</select></label>`:''}
-    ${selected&&stop.kind!=='pendiente'?'<p class="dp-muted">La entrega facturada se incluye completa.</p>':''}
-    ${!selected&&!s.items.some(i=>i.available>0)?'<p class="dp-muted">Sin cantidades pendientes.</p>':''}</article>`;
+    ${canAdd?`<div class="dp-drag-hint">↗ Arrastra este pedido al día</div><div class="dp-touch-assign"><select data-dp-key="${dpEscape(s.key)}" onchange="if(this.value)dpAddToDay(this.dataset.dpKey,this.value)"><option value="">Agregar al día…</option>${dpWeekDays(DP.draft.fecha_salida).map(day=>`<option value="${day}">${dpEscape(dpShortDay(day))}</option>`).join('')}</select></div>`:''}
+    ${!s.items.some(i=>i.available>0)?'<p class="dp-muted">Sin cantidades pendientes.</p>':''}</article>`;
   };
-  return `<div class="dp-row dp-list-count"><span>${list.length} pedidos / entregas encontrados</span><button class="btn btn-sm" onclick="dpSelectVisible()" ${dpWritable()&&!DP.saving?'':'disabled'}>Marcar los disponibles</button></div>`+list.map(row).join('')+(list.length?'':'<div class="dp-empty">No hay pedidos con estos filtros.</div>')+(outside.length?'<h3>Seleccionados fuera del filtro</h3>'+outside.map(row).join(''):'');
+  return `<div class="dp-pending-count">${list.length} pedido${list.length===1?'':'s'} pendiente${list.length===1?'':'s'} en este filtro</div>`+list.map(row).join('')+(list.length?'':'<div class="dp-empty">No quedan pedidos pendientes con estos filtros.</div>');
 }
 function dpSummaryHTML(){
   const plan=dpSchedule(),s=dpSummary(),invalid=DP.draft.paradas.some(p=>p.items.some(i=>!Number.isFinite(Number(i.qty))||Number(i.qty)<0||Math.abs(Number(i.qty)-CandyPlanner.round(Number(i.qty)))>0.000001));
-  if(!plan.orders.length)return '<div class="dp-empty">Marca pedidos para construir el calendario de despachos.</div>';
   const dayLabel=date=>new Date(date+'T12:00:00Z').toLocaleDateString('es-EC',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}).toLocaleUpperCase('es');
   const stockRow=(label,values,final=false)=>`<tr class="dp-stock-row ${final?'dp-stock-final':''}"><td class="dp-col-city dp-sticky-city"></td><td class="dp-col-client dp-sticky-client dp-stock-label">${label}</td><td class="dp-col-order dp-sticky-order"></td><td class="dp-col-date"></td><td class="dp-col-vendor"></td>${plan.products.map(name=>{const value=values.get(name)||0;return `<td class="dp-col-product ${value<0?'dp-stock-negative':''}">${dpQty(value)}</td>`;}).join('')}<td class="dp-col-weight"></td></tr>`;
-  const days=plan.days.map(day=>`<tr class="dp-day-row"><th colspan="${6+plan.products.length}">${dpEscape(dayLabel(day.date))} · ${day.rows.length} pedido${day.rows.length===1?'':'s'} · ${dpQty(day.weight)} kg${day.missingWeights.length?' conocidos':''}</th></tr>${stockRow('INVENTARIO INICIAL',day.initial)}${day.rows.map(o=>`<tr class="dp-client-row"><td class="dp-col-city dp-sticky-city" title="${dpEscape(o.city||'')}">${dpEscape(o.city||'—')}</td><td class="dp-col-client dp-sticky-client" title="${dpEscape(o.client)}"><b>${dpEscape(o.client)}</b></td><td class="dp-col-order dp-sticky-order">${dpEscape(o.orderId)}</td><td class="dp-col-date">${dpDate(o.dueDate)}</td><td class="dp-col-vendor" title="${dpEscape(o.vendor||'')}">${dpEscape(o.vendor||'—')}</td>${plan.products.map(name=>{const item=o.items.find(i=>i.name===name),qty=Number(item?.qty)||0;return `<td class="dp-col-product">${qty?`<b>${dpQty(qty)}</b>`:''}</td>`;}).join('')}<td class="dp-col-weight"><b>${dpQty(o.knownKg)}</b>${o.missingWeights.length?' *':''}</td></tr>`).join('')}${stockRow('INVENTARIO FINAL',day.final,true)}`).join('');
+  const orderRow=o=>{
+    const stopIndex=o.stopIndexes.length===1?o.stopIndexes[0]:-1,stop=DP.draft.paradas[stopIndex],source=stop&&dpCandidates().find(candidate=>candidate.key===stop.key),editable=!!stop&&stop.kind==='pendiente';
+    const cells=plan.products.map(name=>{const item=o.items.find(i=>i.name===name),qty=Number(item?.qty)||0;if(!qty)return '<td class="dp-col-product"></td>';
+      const itemIndex=editable?stop.items.findIndex(i=>i.name===name):-1,max=itemIndex>=0?source?.items.find(i=>i.name===name)?.available:null;
+      return `<td class="dp-col-product">${itemIndex>=0?`<input draggable="false" class="dp-cell-qty" aria-label="Cantidad de ${dpEscape(name)} para ${dpEscape(o.orderId)}" type="number" min="0" step="0.01" value="${dpEscape(qty)}" ${Number.isFinite(Number(max))?'max="'+dpEscape(max)+'"':''} onchange="dpQuantity(${stopIndex},${itemIndex},this.value)">`:`<b>${dpQty(qty)}</b>`}</td>`;}).join('');
+    return `<tr class="dp-client-row" draggable="true" data-dp-order="${dpEscape(o.orderId)}" data-dp-date="${o.dispatchDate}" ondragstart="dpDragScheduled(event,this.dataset.dpOrder,this.dataset.dpDate)" ondragend="dpDragEnd(event)"><td class="dp-col-city dp-sticky-city" title="${dpEscape(o.city||'')}">${dpEscape(o.city||'—')}</td><td class="dp-col-client dp-sticky-client" title="${dpEscape(o.client)}"><b>${dpEscape(o.client)}</b></td><td class="dp-col-order dp-sticky-order"><div class="dp-order-cell"><span>${dpEscape(o.orderId)}</span><button draggable="false" class="dp-row-remove" data-dp-order="${dpEscape(o.orderId)}" data-dp-date="${o.dispatchDate}" onclick="dpRemoveScheduledOrder(this.dataset.dpOrder,this.dataset.dpDate)" title="Quitar del calendario" aria-label="Quitar ${dpEscape(o.orderId)} del calendario">×</button></div></td><td class="dp-col-date">${dpDate(o.dueDate)}</td><td class="dp-col-vendor" title="${dpEscape(o.vendor||'')}">${dpEscape(o.vendor||'—')}</td>${cells}<td class="dp-col-weight"><b>${dpQty(o.knownKg)}</b>${o.missingWeights.length?' *':''}</td></tr>`;
+  };
+  const days=plan.days.map(day=>`<tr class="dp-day-row" data-dp-date="${day.date}" ondragover="dpDragOverDay(event)" ondragleave="dpDragLeaveDay(event)" ondrop="dpDropOnDay(event,this.dataset.dpDate)"><th colspan="${6+plan.products.length}">${dpEscape(dayLabel(day.date))} · ${day.rows.length} pedido${day.rows.length===1?'':'s'} · ${dpQty(day.weight)} kg${day.missingWeights.length?' conocidos':''}</th></tr>${stockRow('INVENTARIO INICIAL',day.initial)}${day.rows.length?day.rows.map(orderRow).join(''):`<tr class="dp-no-orders"><td colspan="${6+plan.products.length}">Sin pedidos. Arrastra uno hasta el encabezado de este día.</td></tr>`}${stockRow('INVENTARIO FINAL',day.final,true)}`).join('');
   return `<div class="dp-schedule-note"><b>${plan.days.length} día${plan.days.length===1?'':'s'} de despacho · ${dpQty(s.knownKg)} kg${s.missingWeights.length?' conocidos':''}</b><span class="dp-muted">Los números negativos indican faltantes.</span></div>
+    ${plan.orders.length?'':'<div class="dp-calendar-empty">Arrastra un pedido pendiente sobre el encabezado del día en que quieres despacharlo.</div>'}
     ${invalid?'<div class="dp-alert dp-alert-bad">Corrige las cantidades: usa números mayores o iguales a cero, con hasta dos decimales.</div>':''}
     ${s.missingWeights.length?`<div class="dp-alert">Peso incompleto. Falta kg por bulto para: ${s.missingWeights.map(dpEscape).join(', ')}.</div>`:''}
     <div class="dp-schedule-wrap"><table class="dp-schedule"><thead><tr><th class="dp-col-city dp-sticky-city">Ciudad</th><th class="dp-col-client dp-sticky-client">Cliente</th><th class="dp-col-order dp-sticky-order">Pedido</th><th class="dp-col-date">Fecha</th><th class="dp-col-vendor">Vendedor</th>${plan.products.map(name=>`<th class="dp-col-product" title="${dpEscape(name)}">${dpEscape(name)}</th>`).join('')}<th class="dp-col-weight">Peso kg</th></tr></thead><tbody>${days}</tbody></table></div>
-    <p class="dp-muted">La fecha es la fecha original del pedido. El inventario inicial se consulta en Bodega; el inventario final pasa automáticamente al día siguiente. * Peso incompleto.</p>`;
+    <p class="dp-muted">La fecha es la fecha original del pedido. Arrastra una fila a otro día para reprogramarla. El inventario final pasa automáticamente como inventario inicial del día siguiente. * Peso incompleto.</p>`;
 }
 function dpRemoveOrder(orderId){if(!dpWritable()||DP.saving)return;DP.draft.paradas=DP.draft.paradas.filter(p=>String(p.orderId)!==orderId);DP.dirty=true;dpRefresh();}
 function dpBody(){
-  if(!DP.data)return `<div class="dp-header"><div><h1>Prepara tu despacho</h1><p>Marca pedidos y consulta las cantidades y el peso que vas sumando.</p></div></div>${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}<div class="dp-empty">${DP.loading?'Cargando pedidos…':'No se han cargado los datos. <button class="btn" onclick="dpLoad()">Reintentar</button>'}</div>`;
+  if(!DP.data)return `<div class="dp-header"><div><h1>Planifica tu semana</h1><p>Arrastra cada pedido al día en que lo vas a despachar.</p></div></div>${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}<div class="dp-empty">${DP.loading?'Cargando pedidos…':'No se han cargado los datos. <button class="btn" onclick="dpLoad()">Reintentar</button>'}</div>`;
   if(!DP.draft)DP.draft=dpNewDraft();
   const d=DP.draft,busy=DP.saving||DP.documentBusy,opts=(key)=>[...new Set(DP.data.sources.filter(CandyPlanner.selectable).map(s=>s[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  return `<div class="dp-header"><div><h1>Planifica tus despachos</h1><p>Marca cada pedido, asigna el día y revisa el inventario disponible.</p></div><div class="dp-actions"><button class="btn" onclick="dpLoad()" ${busy||DP.loading?'disabled':''}>${DP.loading?'Actualizando…':'Actualizar inventario y pedidos'}</button><button class="btn" onclick="dpNew()" ${busy?'disabled':''}>Borrar selección</button></div></div>
+  return `<div class="dp-header"><div><h1>Planificador semanal de despachos</h1><p>Arrastra los pedidos pendientes al día correspondiente y revisa las cantidades por producto.</p></div><div class="dp-actions"><button class="btn" onclick="dpLoad()" ${busy||DP.loading?'disabled':''}>${DP.loading?'Actualizando…':'Actualizar inventario y pedidos'}</button><button class="btn" onclick="dpNew()" ${busy?'disabled':''}>Borrar calendario</button></div></div>
     ${DP.error?`<div class="dp-alert dp-alert-bad" role="alert">${dpEscape(DP.error)}</div>`:''}${DP.message?`<div class="dp-alert dp-alert-ok" role="status">${dpEscape(DP.message)}</div>`:''}
-    <div class="dp-layout dp-schedule-layout"><section class="dp-panel"><div class="dp-panel-head"><h2>Selecciona los pedidos</h2><p>Ajusta cantidades y elige el día de despacho.</p></div><div class="dp-filters">
+    <div class="dp-layout dp-drag-layout"><section class="dp-panel dp-pending-panel"><div class="dp-panel-head"><h2>Pedidos pendientes</h2><p>Arrastra un pedido al encabezado de cualquier día.</p></div><div class="dp-filters">
     <label class="dp-wide">Buscar cliente, pedido, vendedor o producto<input value="${dpEscape(DP.query)}" oninput="dpFilter('query',this.value)" placeholder="Buscar…"></label>
     <label>Ciudad<select onchange="dpFilter('city',this.value)"><option value="">Todas</option>${opts('city').map(x=>`<option value="${dpEscape(x)}" ${DP.city===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
     <label>Sector<select onchange="dpFilter('sector',this.value)"><option value="">Todos</option>${opts('sector').map(x=>`<option value="${dpEscape(x)}" ${DP.sector===x?'selected':''}>${dpEscape(x)}</option>`).join('')}</select></label>
     <label>Entrega hasta<input type="date" value="${dpEscape(DP.until)}" onchange="dpFilter('until',this.value)"></label><label>Estado<select onchange="dpFilter('kind',this.value)"><option value="">Todos</option><option value="POR_FACTURAR" ${DP.kind==='POR_FACTURAR'?'selected':''}>Por facturar</option><option value="POR_DESPACHAR" ${DP.kind==='POR_DESPACHAR'?'selected':''}>Listo para despacho</option></select></label></div><div id="dpCandidates" class="dp-candidates">${dpCandidatesHTML()}</div></section>
-    <section class="dp-panel dp-simple-summary dp-schedule-panel"><div class="dp-panel-head"><h2>Despachos por cliente</h2><p>Cada cliente ocupa una fila y los productos usan únicamente el ancho necesario.</p></div><div class="dp-weekbar"><label>Semana de despachos<input type="date" value="${dpEscape(d.fecha_salida)}" onchange="dpSetWeek(this.value)" ${busy?'disabled':''}></label><strong>${dpEscape(dpShortDay(dpWeekDays(d.fecha_salida)[0]))} — ${dpEscape(dpShortDay(dpWeekDays(d.fecha_salida)[5]))}</strong></div><div class="dp-footer"><button class="btn btn-gold" onclick="dpExport()" ${d.paradas.length&&!busy?'':'disabled'}>Descargar Excel</button><button class="btn" onclick="dpPrint()" ${d.paradas.length&&!busy?'':'disabled'}>Hoja de ruta / PDF</button></div><div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div></div><p class="dp-muted dp-updated">Selección temporal: descarga tus documentos y pulsa Borrar selección para empezar otra. No cambia pedidos ni inventario.<br>Inventario consultado: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}</p></section></div>`;
+    <section class="dp-panel dp-simple-summary dp-schedule-panel dp-calendar-panel"><div class="dp-panel-head"><h2>Calendario tipo Excel</h2><p>Cada pedido forma una fila y cada producto conserva su propia columna.</p></div><div class="dp-weekbar"><div class="dp-week-actions"><button class="btn btn-sm" onclick="dpShiftWeek(-1)" ${busy?'disabled':''} aria-label="Semana anterior">←</button><label>Semana<input type="date" value="${dpEscape(d.fecha_salida)}" onchange="dpSetWeek(this.value)" ${busy?'disabled':''}></label><button class="btn btn-sm" onclick="dpSetWeek(hoyISO())" ${busy?'disabled':''}>Hoy</button><button class="btn btn-sm" onclick="dpShiftWeek(1)" ${busy?'disabled':''} aria-label="Semana siguiente">→</button></div><strong>${dpEscape(dpShortDay(dpWeekDays(d.fecha_salida)[0]))} — ${dpEscape(dpShortDay(dpWeekDays(d.fecha_salida)[5]))}</strong></div><div class="dp-footer"><button class="btn btn-gold" onclick="dpExport()" ${d.paradas.length&&!busy?'':'disabled'}>Descargar Excel</button><button class="btn" onclick="dpPrint()" ${d.paradas.length&&!busy?'':'disabled'}>Hoja de ruta / PDF</button></div><div class="dp-cargo-body"><div id="dpSummary">${dpSummaryHTML()}</div></div><p class="dp-muted dp-updated">Calendario temporal: descarga tus documentos y pulsa Borrar calendario para empezar otra planificación. No guarda planes ni cambia pedidos o inventario.<br>Inventario consultado: ${dpEscape(new Date(DP.data.asOf).toLocaleString('es-EC'))}</p></section></div>`;
 }
 
 async function dpDocument(){

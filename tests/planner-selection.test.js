@@ -24,10 +24,11 @@ test('la selección suma productos y pesos por pedido y total, y permite quitar'
   ctx.dpQuantity(0,0,2);assert.equal(ctx.dpSummary().knownKg,100); // Cream first alphabetically
   ctx.dpToggle('P2:pendiente',false);assert.equal(ctx.dpSummary().knownKg,70);
 });
-test('los filtros conservan la selección y marcar disponibles no duplica',()=>{
-  const {ctx,dp}=setup();dp.city='Quito';ctx.dpSelectVisible();ctx.dpSelectVisible();assert.equal(dp.draft.paradas.length,1);
-  dp.city='Cuenca';const out=ctx.dpCandidatesHTML();assert.match(out,/Seleccionados fuera del filtro/);assert.match(out,/Norte &lt;b&gt;/);
-  ctx.dpSelectVisible();assert.equal(dp.draft.paradas.length,2);
+test('la bandeja muestra solo pendientes y conserva la selección al filtrar',()=>{
+  const {ctx,dp}=setup();dp.city='Quito';assert.match(ctx.dpCandidatesHTML(),/Norte &lt;b&gt;/);
+  ctx.dpAddToDay('P1:pendiente','2026-09-11');assert.equal(dp.draft.paradas.length,1);assert.equal(dp.draft.paradas[0].dispatchDate,'2026-09-11');
+  assert.doesNotMatch(ctx.dpCandidatesHTML(),/Norte &lt;b&gt;/);dp.city='Cuenca';assert.match(ctx.dpCandidatesHTML(),/Sur/);
+  ctx.dpAddToDay('P1:pendiente','2026-09-12');assert.equal(dp.draft.paradas.length,1);
 });
 test('los documentos validan una selección sin guardar y no crean planes',async()=>{
   const {ctx,dp}=setup();ctx.dpSelect('P1:pendiente');assert.equal(dp.dirty,true);assert.equal(dp.draft.id,undefined);
@@ -74,6 +75,17 @@ test('la matriz separa clientes por día y arrastra el inventario final',()=>{
   const plan=ctx.dpSchedule();assert.equal(plan.days.length,6);assert.equal(plan.days[1].rows[0].client,'Norte <b>');assert.equal(plan.days[1].final.get('YumYum'),4);
   assert.equal(plan.days[2].initial.get('YumYum'),4);assert.equal(plan.days[2].final.get('YumYum'),-2);assert.equal(plan.days[5].final.get('YumYum'),-2);
   const rendered=ctx.dpSummaryHTML();assert.match(rendered,/Norte &lt;b&gt;/);assert.match(rendered,/Sur/);assert.match(rendered,/dp-stock-negative/);
+});
+test('arrastrar permite agregar, mover y devolver pedidos a pendientes',()=>{
+  const {ctx,dp}=setup(),classList={add(){},remove(){}};
+  const drop=(payload,date)=>ctx.dpDropOnDay({preventDefault(){},currentTarget:{classList},dataTransfer:{getData:()=>JSON.stringify(payload)}},date);
+  drop({type:'candidate',key:'P1:pendiente'},'2026-09-10');assert.equal(dp.draft.paradas[0].dispatchDate,'2026-09-10');
+  drop({type:'scheduled',orderId:'P1',date:'2026-09-10'},'2026-09-12');assert.equal(dp.draft.paradas[0].dispatchDate,'2026-09-12');
+  ctx.dpRemoveScheduledOrder('P1','2026-09-12');assert.equal(dp.draft.paradas.length,0);assert.match(ctx.dpCandidatesHTML(),/Norte &lt;b&gt;/);
+});
+test('el calendario vacío conserva seis días y todas las columnas del catálogo',()=>{
+  const {ctx}=setup(),rendered=ctx.dpSummaryHTML();
+  assert.equal((rendered.match(/class="dp-day-row"/g)||[]).length,6);assert.match(rendered,/YumYum/);assert.match(rendered,/Cream/);assert.match(rendered,/Arrastra uno/);
 });
 test('permite escoger la semana completa y reasigna fechas que quedan fuera',()=>{
   const {ctx,dp}=setup();ctx.dpSelect('P1:pendiente');assert.deepEqual(Array.from(ctx.dpWeekDays(dp.draft.fecha_salida)),['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12']);
