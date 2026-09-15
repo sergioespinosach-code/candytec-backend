@@ -715,7 +715,15 @@ let ORDERS = [
 ];
 
 function money(n){return '$'+(+n).toLocaleString('es-EC',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function pedidoResumenProductos(products,productFallback='',qtyFallback=''){
+  if(!Array.isArray(products)||!products.length)return {product:productFallback||'',qty:qtyFallback||''};
+  const names=[...new Set(products.map(p=>String(p?.name||'').trim()).filter(Boolean))];
+  const total=Math.round(products.reduce((sum,p)=>sum+(Number(p?.qty)||0),0)*100)/100;
+  return {product:(names[0]||productFallback||'')+(names.length>1?` (+${names.length-1} más)`:''),qty:total.toLocaleString('es-EC',{maximumFractionDigits:2})+' unidades'};
+}
+function actualizarResumenPedido(o){const summary=pedidoResumenProductos(o.products,o.product,o.qty);o.product=summary.product;o.qty=summary.qty;return o;}
 function computeTotals(o){
+  actualizarResumenPedido(o);
   if(!o.products||!o.products.length){o.subtotal=0;o.descuentoMonto=0;o.iva=0;o.total=0;return;}
   o.subtotal=+(o.products.reduce((a,p)=>a+p.qty*p.price,0)).toFixed(2);
   const d=Math.min(100,Math.max(0,+(o.descuento||0)));

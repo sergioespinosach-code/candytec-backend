@@ -5,6 +5,7 @@ const express = require('express');
 const dispatchPlanner = require('./lib/dispatch-planner');
 const inventoryMovement = require('./lib/inventory-movement');
 const orderFinance = require('./lib/order-finance');
+const orderSummary = require('./lib/order-summary');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -534,6 +535,8 @@ app.put('/api/clientes/:id', verifyToken, async (req, res) => {
     if (!current.rows.length) return res.status(404).json({ error: 'Cliente no encontrado' });
     const row = current.rows[0];
     const b = req.body;
+    const products = b.products !== undefined ? b.products : row.products;
+    const summary = orderSummary.summarize(products,{producto:row.producto,cantidad:row.cantidad});
     const merged = {
       nombre: b.nombre !== undefined ? b.nombre : row.nombre,
       ruc: b.ruc !== undefined ? b.ruc : row.ruc,
@@ -628,17 +631,19 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
       pago: JSON.stringify(b.pago !== undefined ? b.pago : row.pago),
       history: JSON.stringify(b.history !== undefined ? b.history : row.history),
       attach: JSON.stringify(b.attach !== undefined ? b.attach : row.attach),
-      products: JSON.stringify(b.products !== undefined ? b.products : row.products),
+      products: JSON.stringify(products),
+      producto: summary.producto,
+      cantidad: summary.cantidad,
       entregas: JSON.stringify(b.entregas !== undefined ? b.entregas : (row.entregas || [])),
     };
 
     const result = await pool.query(
       `UPDATE pedidos SET factura=$1, estado=$2, fecha_cobro=$3, subtotal=$4, descuento=$5,
-       descuento_motivo=$6, recibio_nombre=$7, pago=$8, history=$9, attach=$10, products=$11, fecha_entrega=$12, entregas=$13, direccion_entrega=$14, iva_tasa=$15, costo_transporte=$16, costo_estibaje=$17
-       WHERE numero_pedido=$18 AND financial_data=$19::jsonb RETURNING *`,
+       descuento_motivo=$6, recibio_nombre=$7, pago=$8, history=$9, attach=$10, products=$11, fecha_entrega=$12, entregas=$13, direccion_entrega=$14, iva_tasa=$15, costo_transporte=$16, costo_estibaje=$17, producto=$18, cantidad=$19
+       WHERE numero_pedido=$20 AND financial_data=$21::jsonb RETURNING *`,
       [merged.factura, merged.estado, merged.fecha_cobro, merged.subtotal, merged.descuento,
        merged.descuento_motivo, merged.recibio_nombre, merged.pago, merged.history, merged.attach,
-       merged.products, merged.fecha_entrega, merged.entregas, merged.direccion_entrega, merged.iva_tasa, merged.costo_transporte, merged.costo_estibaje, req.params.id, JSON.stringify(row.financial_data)]
+       merged.products, merged.fecha_entrega, merged.entregas, merged.direccion_entrega, merged.iva_tasa, merged.costo_transporte, merged.costo_estibaje, merged.producto, merged.cantidad, req.params.id, JSON.stringify(row.financial_data)]
     );
     if(!result.rows.length)return res.status(409).json({error:'El pedido recibió un ajuste financiero. Actualiza antes de guardar.'});
     res.json(result.rows[0]);
