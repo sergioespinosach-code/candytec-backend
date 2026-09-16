@@ -535,8 +535,6 @@ app.put('/api/clientes/:id', verifyToken, async (req, res) => {
     if (!current.rows.length) return res.status(404).json({ error: 'Cliente no encontrado' });
     const row = current.rows[0];
     const b = req.body;
-    const products = b.products !== undefined ? b.products : row.products;
-    const summary = orderSummary.summarize(products,{producto:row.producto,cantidad:row.cantidad});
     const merged = {
       nombre: b.nombre !== undefined ? b.nombre : row.nombre,
       ruc: b.ruc !== undefined ? b.ruc : row.ruc,
@@ -614,6 +612,8 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
     const row = current.rows[0];
     const b = req.body;
     orderFinance.protect(row,b);
+    const products = b.products !== undefined ? b.products : row.products;
+    const summary = orderSummary.summarize(products,{producto:row.producto,cantidad:row.cantidad});
 
     const merged = {
       factura: b.factura !== undefined ? b.factura : row.factura,
