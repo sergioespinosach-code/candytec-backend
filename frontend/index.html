@@ -2541,7 +2541,7 @@ function openOrder(id){
       ${o.descuentoMonto&&veDcto?`<tr class="tt"><td colspan="3">Descuento ${o.descuento}%</td><td style="text-align:right;color:var(--bad-tx)">−${money(o.descuentoMonto)}</td></tr>
       <tr class="tt"><td colspan="3">Base (sin IVA)</td><td style="text-align:right">${money(o.subtotal-o.descuentoMonto)}</td></tr>`:''}
       <tr class="tt"><td colspan="3">IVA ${o.ivaTasa!=null?o.ivaTasa:15}%</td><td style="text-align:right">${money(o.iva)}</td></tr>
-      <tr class="tt big"><td colspan="3">Total original del pedido</td><td style="text-align:right">${money(o.total)}</td></tr>
+      <tr class="tt big"><td colspan="3">Total de productos del pedido vigente</td><td style="text-align:right">${money(o.total)}</td></tr>
     </table>
     ${o.descuentoMotivo&&veMotivo?`<div class="hint" style="margin:-12px 0 18px"><b>Motivo del descuento:</b> ${o.descuentoMotivo}</div>`:''}`;
   }
@@ -2690,8 +2690,10 @@ function modalActions(o){
     if(!tieneEntregas(o)) acts.push(`<button class="btn btn-danger" onclick="returnOrder('${o.id}')">Devolver al vendedor</button>`);
     acts.push(`<button class="btn btn-gold" onclick="openFacturar('${o.id}')">${tieneEntregas(o)?'Facturar siguiente entrega':'Facturar'}</button>`);
   }
-  if(currentRole==='gerente_proy')
+  if(currentRole==='gerente_proy'&&!CandyFinance.summary(o).invoices.length)
     acts.push(`<button class="btn btn-ghost" onclick="openEditarProductos('${o.id}')">✏ Editar productos</button>`);
+  if(financeCanEdit()&&CandyFinance.summary(o).invoices.length)
+    acts.push(`<button class="btn btn-gold" data-order="${financeEscape(o.id)}" onclick="openFinance(this.dataset.order,null,'CONCILIAR_PEDIDO')">Editar pedido según factura contable</button>`);
   if(esFacturacion()||isGerente())
     acts.push(`<button class="btn btn-ghost" onclick="openAdjuntarDocumento('${o.id}')">📎 Adjuntar documento</button>`);
   if(r==='bodega'&&s==='POR_ENTREGAR')
@@ -2816,6 +2818,8 @@ function updateEditTotals(){
   const sEl=document.getElementById('edit_subtotal'); if(sEl) sEl.textContent=money(sub);
 }
 function openEditarProductos(id){
+  const billedOrder=ORDERS.find(x=>x.id===id);
+  if(billedOrder&&CandyFinance.summary(billedOrder).invoices.length){if(financeCanEdit())openFinance(id,null,'CONCILIAR_PEDIDO');return;}
   if(currentRole!=='gerente_proy'){toast('Solo tú puedes editar los productos de un pedido');return;}
   const o=ORDERS.find(x=>x.id===id); if(!o) return;
   editPedidoId=id;
@@ -5594,13 +5598,13 @@ function financeCanEdit(){return esFacturacion()||isGerente();}
 function financePanel(o){
   const s=CandyFinance.summary(o);if(!s.invoices.length)return '';
   const e=financeEscape;
-  return `<div class="sec-title">Facturación real y ajustes</div><table class="ptable"><tr><td>Valor del pedido tras ajustes (incluye lo pendiente de facturar)</td><td>${money(o.total+s.corrections-s.credits)}</td></tr><tr><td>Facturado original registrado</td><td>${money(s.original)}</td></tr><tr><td>Correcciones de registro</td><td>${money(s.corrections)}</td></tr><tr><td>Notas de crédito vigentes</td><td>−${money(s.credits)}</td></tr><tr class="tt big"><td>Facturación neta</td><td>${money(s.net)}</td></tr><tr><td>Pagos recibidos</td><td>${money(s.paid)}</td></tr><tr class="tt"><td>Pendiente por cobrar</td><td>${money(s.balance)}</td></tr>${s.creditBalance?`<tr class="tt"><td>Saldo a favor del cliente en este pedido</td><td>${money(s.creditBalance)}</td></tr>`:''}</table>
-    <div class="hint">El total de productos corresponde al pedido original. Este resumen corresponde a lo facturado y ajustado; excluye lo pendiente de facturar. El saldo a favor no se devuelve ni se aplica a otros pedidos automáticamente.</div>
+  return `<div class="sec-title">Facturación real y ajustes</div><table class="ptable"><tr><td>Valor del pedido tras ajustes (incluye lo pendiente de facturar)</td><td>${money((tieneEntregas(o)?valorPendienteFacturarConIva(o):0)+s.net)}</td></tr><tr><td>Facturado original registrado</td><td>${money(s.original)}</td></tr><tr><td>Correcciones de registro</td><td>${money(s.corrections)}</td></tr><tr><td>Notas de crédito vigentes</td><td>−${money(s.credits)}</td></tr><tr class="tt big"><td>Facturación neta</td><td>${money(s.net)}</td></tr><tr><td>Pagos recibidos</td><td>${money(s.paid)}</td></tr><tr class="tt"><td>Pendiente por cobrar</td><td>${money(s.balance)}</td></tr>${s.creditBalance?`<tr class="tt"><td>Saldo a favor del cliente en este pedido</td><td>${money(s.creditBalance)}</td></tr>`:''}</table>
+    <div class="hint">El detalle de productos muestra el pedido vigente. La facturación neta incorpora las correcciones registradas y excluye lo pendiente de facturar. El saldo a favor no se devuelve ni se aplica a otros pedidos automáticamente.</div>
     ${financeCanEdit()?`<button class="btn btn-gold" data-order="${e(o.id)}" onclick="openFinance(this.dataset.order)">Ajustes de facturación</button>`:''}
     <div style="overflow:auto;margin:14px 0"><table class="ptable"><tr><th>Factura</th><th>Base corregida</th><th>IVA corregido</th><th>NC</th><th>Neto</th></tr>${s.invoices.map(i=>`<tr><td>${e(i.numero)}</td><td>${money(i.base)}</td><td>${money(i.iva)}</td><td>${money(i.ncBase+i.ncIva)}</td><td>${money(i.total)}</td></tr>`).join('')}</table></div>
-    ${s.events.length?`<div class="sec-title">Historial de ajustes financieros</div>${s.events.slice().reverse().map(a=>`<div class="section-note" style="display:block"><b>${e({NC:'Nota de crédito',CORRECCION:'Corrección de registro',REVERSO:'Reversión de registro'}[a.type])} ${e(a.number||'')}</b> · Factura ${e(a.invoice)} · ${e(a.date)}<br>${a.type==='REVERSO'?'Registro revertido: '+e(s.events.find(x=>x.id===a.target)?.number||'ajuste anterior'):'Base '+money(a.base)+' · IVA '+money(a.iva)}${s.reversed.includes(a.id)?' · REVERTIDO':''}<br>${e(a.reason)}<br><small>${e(a.actor?.name)} · ${e(a.createdAt)}</small>${a.lineDiscounts?`<div style="overflow:auto"><table class="ptable"><tr><th>Producto / cantidad</th><th>Base anterior</th><th>Descuento registrado</th><th>Base final</th></tr>${a.lineDiscounts.map(l=>`<tr><td>${e(l.name)} · ${e(l.qty)}</td><td>${money(l.base)}</td><td>${l.mode==='percent'?e(l.value)+' % · ':''}${money(l.discount)}</td><td>${money(l.net)}</td></tr>`).join('')}</table></div>`:''}${a.attachment&&/^https:\/\//i.test(a.attachment.url)?`<br><a href="${e(a.attachment.url)}" target="_blank" rel="noopener noreferrer">Ver documento: ${e(a.attachment.name)}</a>`:''}${financeCanEdit()&&a.type!=='REVERSO'&&!s.reversed.includes(a.id)?`<br><button class="btn btn-sm" data-order="${e(o.id)}" data-target="${e(a.id)}" onclick="openFinance(this.dataset.order,this.dataset.target)">Revertir registro</button>`:''}</div>`).join('')}`:''}`;
+    ${s.events.length?`<div class="sec-title">Historial de ajustes financieros</div>${s.events.slice().reverse().map(a=>`<div class="section-note" style="display:block"><b>${e({NC:'Nota de crédito',CORRECCION:'Corrección de registro',REVERSO:'Reversión de registro'}[a.type])} ${e(a.number||'')}</b> · Factura ${e(a.invoice)} · ${e(a.date)}<br>${a.type==='REVERSO'?'Registro revertido: '+e(s.events.find(x=>x.id===a.target)?.number||'ajuste anterior'):'Base '+money(a.base)+' · IVA '+money(a.iva)}${s.reversed.includes(a.id)?' · REVERTIDO':''}<br>${e(a.reason)}<br><small>${e(a.actor?.name)} · ${e(a.createdAt)}</small>${a.subtype==='CONCILIACION_PEDIDO'?`<details><summary>Ver productos antes y después de la conciliación</summary><p><b>Antes:</b> ${(a.before?.products||[]).map(p=>e(p.name)+': '+e(p.qty)+' × '+money(p.price)).join(' · ')}</p><p><b>Después:</b> ${(a.after?.products||[]).map(p=>e(p.name)+': '+e(p.qty)+' × '+money(p.price)).join(' · ')}</p></details>`:''}${a.lineDiscounts?`<div style="overflow:auto"><table class="ptable"><tr><th>Producto / cantidad</th><th>Base anterior</th><th>Descuento registrado</th><th>Base final</th></tr>${a.lineDiscounts.map(l=>`<tr><td>${e(l.name)} · ${e(l.qty)}</td><td>${money(l.base)}</td><td>${l.mode==='percent'?e(l.value)+' % · ':''}${money(l.discount)}</td><td>${money(l.net)}</td></tr>`).join('')}</table></div>`:''}${a.attachment&&/^https:\/\//i.test(a.attachment.url)?`<br><a href="${e(a.attachment.url)}" target="_blank" rel="noopener noreferrer">Ver documento: ${e(a.attachment.name)}</a>`:''}${financeCanEdit()&&a.type!=='REVERSO'&&a.subtype!=='CONCILIACION_PEDIDO'&&!s.reversed.includes(a.id)?`<br><button class="btn btn-sm" data-order="${e(o.id)}" data-target="${e(a.id)}" onclick="openFinance(this.dataset.order,this.dataset.target)">Revertir registro</button>`:''}</div>`).join('')}`:''}`;
 }
-async function openFinance(id,target=null){
+async function openFinance(id,target=null,initialType=null){
   if(!financeCanEdit()||financeSaving)return;
   if(financeEditor?.pending){toast('Reintenta el ajuste pendiente antes de abrir otro.');return;}
   try{
@@ -5609,24 +5613,25 @@ async function openFinance(id,target=null){
     financeEditor={id,data,target,attachment:null,pending:null};
     const e=financeEscape,rows=data.summary.invoices;
     const previous=target?data.summary.events.find(a=>a.id===target):null;
-    document.getElementById('modal').innerHTML=`<div class="modal-head"><div><div class="mh-id">${target?'Revertir registro':'Ajustes de facturación'}</div><div class="mh-client">${e(id)} · ${e(data.pedido.cliente)}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body"><div class="section-note">Registra documentos emitidos en tu sistema contable. Esta pantalla no emite ni anula documentos fiscales y no cambia cantidades ni inventario.</div><div id="financeStatus" role="status" aria-live="polite" style="white-space:pre-wrap;margin:12px 0"></div>
+    document.getElementById('modal').innerHTML=`<div class="modal-head"><div><div class="mh-id">${target?'Revertir registro':'Ajustes de facturación'}</div><div class="mh-client">${e(id)} · ${e(data.pedido.cliente)}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body"><div class="section-note">Registra documentos emitidos en tu sistema contable. La conciliación actualiza las cantidades del pedido y de la entrega registrada. No registra movimientos físicos de inventario ni emite documentos fiscales.</div><div id="financeStatus" role="status" aria-live="polite" style="white-space:pre-wrap;margin:12px 0"></div>
     <fieldset id="financeFields" style="border:0;padding:0"><div class="formgrid">
-    ${target?`<div class="field full">Se revertirá el efecto de ${e(previous?.number||target)} sobre la factura ${e(previous?.invoice)}. El registro y su documento permanecerán en el historial.</div>`:`<div class="field"><label>Operación</label><select id="f_type" onchange="financeDefaults()"><option value="NC">Registrar nota de crédito</option><option value="CORRECCION">Corregir valores registrados</option><option value="DESCUENTO_PRODUCTO">Corregir descuento por producto</option></select></div><div class="field"><label>Factura afectada</label><select id="f_invoice" onchange="financeDefaults()">${rows.map(i=>`<option value="${e(i.numero)}">${e(i.numero)} · neto ${money(i.total)}</option>`).join('')}</select></div><div class="field"><label>Número del documento de respaldo</label><input id="f_number" maxlength="100"></div>`}
+    ${target?`<div class="field full">Se revertirá el efecto de ${e(previous?.number||target)} sobre la factura ${e(previous?.invoice)}. El registro y su documento permanecerán en el historial.</div>`:`<div class="field"><label>Operación</label><select id="f_type" onchange="financeDefaults()"><option value="NC">Registrar nota de crédito</option><option value="CORRECCION">Corregir valores registrados</option><option value="DESCUENTO_PRODUCTO">Corregir descuento por producto</option><option value="CONCILIAR_PEDIDO">Editar pedido según factura contable</option></select></div><div class="field"><label>Factura afectada</label><select id="f_invoice" onchange="financeDefaults()">${rows.map(i=>`<option value="${e(i.numero)}">${e(i.numero)} · neto ${money(i.total)}</option>`).join('')}</select></div><div class="field"><label>Número del documento de respaldo</label><input id="f_number" maxlength="100"></div>`}
     <div class="field"><label>Fecha del documento / reversión</label><input id="f_date" type="date" value="${hoyISO()}"></div>
-    ${target?'':`<div class="field"><label id="f_baseLabel">Base de la nota de crédito, sin IVA</label><input id="f_base" type="number" min="0" step="0.01" oninput="financePreview()"></div><div class="field"><label id="f_ivaLabel">IVA de la nota de crédito</label><input id="f_iva" type="number" min="0" step="0.01" value="0" oninput="financePreview()"></div><div id="financeHelp" class="field full"></div><div id="financeProductLines" class="field full" style="overflow:auto"></div><div class="field full"><label>Documento emitido (PDF o imagen, obligatorio)</label><input type="file" accept="application/pdf,image/*" onchange="financeAttach(this)"><span id="financeFile"></span></div>`}
+    ${target?'':`<div class="field"><label id="f_baseLabel">Base de la nota de crédito, sin IVA</label><input id="f_base" type="number" min="0" step="0.01" oninput="financePreview()"></div><div class="field"><label id="f_ivaLabel">IVA de la nota de crédito</label><input id="f_iva" type="number" min="0" step="0.01" value="0" oninput="financePreview()"></div><div id="financeHelp" class="field full"></div><div id="financeProductLines" class="field full" style="overflow:auto"></div><div class="field full"><label>Documento emitido (PDF o imagen, obligatorio)</label><label class="filedrop"><input type="file" accept="application/pdf,image/*" onchange="financeAttach(this)"><span class="fd-label">Adjuntar factura o documento contable</span></label><span id="financeFile"></span></div>`}
     <div class="field full"><label>Motivo obligatorio</label><textarea id="f_reason" maxlength="2000" oninput="financePreview()"></textarea></div></div></fieldset><div id="financePreview" class="section-note" style="display:block"></div></div><div class="modal-actions"><button class="btn" onclick="closeModal()">Cerrar</button><button id="financeSubmit" class="btn btn-gold" onclick="saveFinance()">${target?'Revertir registro':'Registrar ajuste'}</button></div>`;
-    document.getElementById('overlay').classList.add('open');financeDefaults();
+    document.getElementById('overlay').classList.add('open');if(initialType&&!target)document.getElementById('f_type').value=initialType;financeDefaults();
   }catch(err){toast('No se pudo abrir el registro: '+err.message);}
 }
-function financeAttach(el){const editor=financeEditor;handleFileDrop(el,up=>{if(financeEditor!==editor)return;editor.attachment=up;document.getElementById('financeFile').textContent='Adjunto: '+up.name;financePreview();});}
+async function financeAttach(el){const editor=financeEditor;if(!editor||financeSaving||editor.pending)return;editor.uploading=true;try{await handleFileDrop(el,up=>{if(financeEditor!==editor)return;editor.attachment=up;document.getElementById('financeFile').textContent='Adjunto: '+up.name;financePreview();});}finally{editor.uploading=false;}}
 function financeDefaults(){
   if(!financeEditor||financeEditor.target){financePreview();return;}
-  const kind=document.getElementById('f_type').value,byProduct=kind==='DESCUENTO_PRODUCTO',correction=kind==='CORRECCION'||byProduct,i=financeEditor.data.summary.invoices.find(x=>x.numero===document.getElementById('f_invoice').value);
-  financeEditor.productLines=null;document.getElementById('financeProductLines').innerHTML='';document.getElementById('f_base').readOnly=byProduct;
+  const kind=document.getElementById('f_type').value,byProduct=kind==='DESCUENTO_PRODUCTO',correction=kind==='CORRECCION'||byProduct||kind==='CONCILIAR_PEDIDO',i=financeEditor.data.summary.invoices.find(x=>x.numero===document.getElementById('f_invoice').value);
+  financeEditor.reconciliationLines=null;financeEditor.productLines=null;document.getElementById('financeProductLines').innerHTML='';document.getElementById('f_base').readOnly=byProduct;
   document.getElementById('f_baseLabel').textContent=correction?'Base correcta de la factura, antes de notas de crédito':'Base de la nota de crédito, sin IVA';
   document.getElementById('f_ivaLabel').textContent=correction?'IVA correcto de la factura (0 si corresponde)':'IVA de la nota de crédito';
   document.getElementById('f_base').value=correction?i.base:'';document.getElementById('f_iva').value=correction?i.iva:0;
   document.getElementById('financeHelp').textContent=correction?'Copia los valores de la factura real, antes de descontar notas de crédito. No vuelvas a descontar aquí una nota ya registrada.':'Copia por separado base e IVA del documento. Ambos importes reducen el saldo.';
+  if(kind==='CONCILIAR_PEDIDO'){reconciliationForm(i);return;}
   if(byProduct){financeProductForm(i);return;}financePreview();
 }
 function financeProductForm(invoice){
@@ -5651,21 +5656,63 @@ function financeProductChange(){
   financePreview();
 }
 
+
+function reconciliationForm(invoice){
+  const data=financeEditor.data.correction;
+  if(!data){document.getElementById('financeProductLines').textContent='Actualiza el servidor para utilizar la conciliación.';return;}
+  financeEditor.reconciliationLines=(data.invoices.find(i=>i.numero===invoice.numero)?.lines||[]).map(l=>({...l}));
+  financeEditor.reconciliationTaxRatio=invoice.base?invoice.iva/invoice.base:0;
+  document.getElementById('f_number').value=invoice.numero;
+  document.getElementById('financeHelp').textContent='Copia los productos y cantidades que constan en esta factura. Solo se reemplaza su parte del pedido; lo pendiente y las demás facturas se conservan. Revisa base e IVA contra el documento, antes de notas de crédito. Si ya hubo una salida física, revisa cualquier diferencia con Bodega por separado.';
+  reconciliationLinesHTML();financePreview();
+}
+function reconciliationLinesHTML(){
+  const editor=financeEditor,e=financeEscape,lines=editor.reconciliationLines;
+  if(!lines)return;
+  const invoice=document.getElementById('f_invoice').value;
+  const deliveries=editor.data.correction.deliveries.filter(d=>d.invoice===invoice);
+  const options=deliveries.length?deliveries:[{index:-1,state:'Pedido completo'}];
+  document.getElementById('financeProductLines').innerHTML=`<div style="overflow:auto"><table class="ptable"><tr><th>Entrega</th><th>Producto</th><th>Unidades</th><th>Precio unitario</th><th></th></tr>${lines.map((l,i)=>`<tr><td><select aria-label="Entrega de la línea ${i+1}" onchange="reconciliationChange(${i},'deliveryIndex',Number(this.value))">${options.map(d=>`<option value="${d.index}" ${d.index===l.deliveryIndex?'selected':''}>${d.index<0?'Pedido':'Entrega '+(d.index+1)} · ${e(d.state)}</option>`).join('')}</select></td><td><input aria-label="Producto de la línea ${i+1}" list="reconciliationCatalog" value="${e(l.name)}" onchange="reconciliationChange(${i},'name',this.value)" style="min-width:200px"></td><td><input aria-label="Unidades de la línea ${i+1}" type="number" min="0.01" step="0.01" value="${e(l.qty)}" oninput="reconciliationChange(${i},'qty',this.value)" style="width:90px"></td><td><input aria-label="Precio de la línea ${i+1}" type="number" min="0" step="0.01" value="${e(l.price)}" oninput="reconciliationChange(${i},'price',this.value)" style="width:90px"></td><td><button class="btn" onclick="reconciliationRemove(${i})" aria-label="Quitar línea ${i+1}">×</button></td></tr>`).join('')}</table></div><datalist id="reconciliationCatalog">${CATALOGO.map(n=>`<option value="${e(n)}"></option>`).join('')}</datalist><button class="btn" onclick="reconciliationAdd()">Agregar producto</button><p class="hint">Al cambiar cantidades o precios se propone una base con el descuento general del pedido. Puedes corregir base e IVA para copiar exactamente la factura contable. Para corregir una conciliación previa, registra otra; ambas quedan en el historial.</p>`;
+}
+function reconciliationChange(index,key,value){
+  if(financeSaving||financeEditor?.pending)return;
+  financeEditor.reconciliationLines[index][key]=value;
+  if(key==='qty'||key==='price')reconciliationTotals();
+}
+function reconciliationTotals(){
+  const editor=financeEditor;
+  const gross=editor.reconciliationLines.reduce((sum,l)=>sum+(Number(l.qty)||0)*(Number(l.price)||0),0);
+  const base=Math.round(gross*(1-Number(editor.data.correction.discount||0)/100)*100)/100;
+  document.getElementById('f_base').value=base.toFixed(2);
+  document.getElementById('f_iva').value=(Math.round(base*editor.reconciliationTaxRatio*100)/100).toFixed(2);financePreview();
+}
+function reconciliationAdd(){
+  if(financeSaving||financeEditor?.pending)return;
+  const invoice=document.getElementById('f_invoice').value;
+  const index=financeEditor.data.correction.deliveries.find(d=>d.invoice===invoice)?.index??-1;
+  financeEditor.reconciliationLines.push({deliveryIndex:index,name:'',qty:1,price:0});reconciliationLinesHTML();
+}
+function reconciliationRemove(index){
+  if(financeSaving||financeEditor?.pending)return;
+  financeEditor.reconciliationLines.splice(index,1);reconciliationLinesHTML();reconciliationTotals();
+}
+
 function financeBody(){
   const read=id=>document.getElementById(id)?.value;
-  return {type:financeEditor.target?'REVERSO':read('f_type'),target:financeEditor.target,invoice:read('f_invoice'),number:read('f_number'),date:read('f_date'),base:read('f_base'),iva:read('f_iva'),reason:read('f_reason'),attachment:financeEditor.attachment,lines:financeEditor.productLines?.map((r,index)=>({name:r.name,mode:read('fp_mode_'+index),value:read('fp_value_'+index)}))};
+  return {type:financeEditor.target?'REVERSO':read('f_type'),target:financeEditor.target,invoice:read('f_invoice'),number:read('f_number'),date:read('f_date'),base:read('f_base'),iva:read('f_iva'),reason:read('f_reason'),attachment:financeEditor.attachment,lines:financeEditor.reconciliationLines||financeEditor.productLines?.map((r,index)=>({name:r.name,mode:read('fp_mode_'+index),value:read('fp_value_'+index)}))};
 }
 function financePreview(){
   if(!financeEditor)return;const el=document.getElementById('financePreview');if(!el)return;
-  try{const b={...financeBody(),reason:'Vista previa',number:'Vista previa',attachment:financeEditor.attachment||{name:'Vista previa',url:'https://example.invalid/preview'},operation_key:'preview-financial-operation'};const data=CandyFinance.append(financeEditor.data.pedido,b,{},new Date().toISOString());const s=CandyFinance.summary({...financeEditor.data.pedido,financial_data:data});el.textContent='Resultado: facturación neta '+money(s.net)+' · cobrado '+money(s.paid)+' · pendiente '+money(s.balance)+(s.creditBalance?' · saldo a favor '+money(s.creditBalance):'');}
+  try{const b={...financeBody(),reason:'Vista previa',number:'Vista previa',attachment:financeEditor.attachment||{name:'Vista previa',url:'https://example.invalid/preview'},operation_key:'preview-financial-operation'};const data=CandyFinance.append(financeEditor.data.pedido,{...b,type:b.type==='CONCILIAR_PEDIDO'?'CORRECCION':b.type},{},new Date().toISOString());const s=CandyFinance.summary({...financeEditor.data.pedido,financial_data:data});el.textContent='Resultado: facturación neta '+money(s.net)+' · cobrado '+money(s.paid)+' · pendiente '+money(s.balance)+(s.creditBalance?' · saldo a favor '+money(s.creditBalance):'');}
   catch(e){el.textContent=e.message;}
 }
 async function saveFinance(){
   if(!financeCanEdit()||financeSaving||!financeEditor)return;
   const editor=financeEditor,status=document.getElementById('financeStatus'),button=document.getElementById('financeSubmit');
+  if(editor.uploading){status.textContent='Espera a que termine de subir el documento.';return;}
   if(!editor.pending){
     const body={...financeBody(),operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'finance-'+Date.now()+'-'+Math.random().toString(36).slice(2),expected_token:editor.data.token};
-    try{CandyFinance.append(editor.data.pedido,body,{},new Date().toISOString());}catch(e){status.textContent=e.message;return;}editor.pending=body;
+    try{if(body.type==='CONCILIAR_PEDIDO'){if(!body.lines?.length||body.lines.some(l=>!l.name||!Number.isFinite(Number(l.qty))||Number(l.qty)<=0||!Number.isFinite(Number(l.price))||Number(l.price)<0))throw Error('Revisa los productos, cantidades y precios.');}CandyFinance.append(editor.data.pedido,{...body,type:body.type==='CONCILIAR_PEDIDO'?'CORRECCION':body.type},{},new Date().toISOString());}catch(e){status.textContent=e.message;return;}editor.pending=body;
   }
   financialWriteVersion++;financeSaving=true;document.getElementById('financeFields').disabled=true;button.disabled=true;status.textContent='Guardando el ajuste en el servidor…';
   try{
