@@ -7,6 +7,7 @@ const inventoryMovement = require('./lib/inventory-movement');
 const orderFinance = require('./lib/order-finance');
 const orderSummary = require('./lib/order-summary');
 const businessControl = require('./lib/business-control');
+const productMaster = require('./lib/product-master');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -368,48 +369,19 @@ app.post('/api/auth/register', verifyToken, requireSuperAdmin, async (req, res) 
 // ============================================================
 app.get('/api/catalogo', verifyToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM catalogo ORDER BY nombre ASC');
+    const result = await pool.query('SELECT * FROM catalogo WHERE activo=TRUE ORDER BY nombre ASC');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/catalogo', verifyToken, requireSuperAdmin, async (req, res) => {
-  try {
-    const { nombre, peso_bulto } = req.body;
-    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre no puede estar vacío' });
-    const result = await pool.query('INSERT INTO catalogo (nombre, peso_bulto) VALUES ($1, $2) RETURNING *', [nombre.trim(), peso_bulto || null]);
-    await pool.query(
-      `INSERT INTO inventario (tipo, nombre, unidad, stock, minimo) VALUES ('producto_terminado', $1, 'unidades', 0, 0)
-       ON CONFLICT (tipo, nombre) DO NOTHING`,
-      [nombre.trim()]
-    );
-    res.json(result.rows[0]);
-  } catch (err) {
-    if (err.code === '23505') return res.status(400).json({ error: 'Ese producto ya existe en el catálogo' });
-    res.status(500).json({ error: err.message });
-  }
-});
-app.put('/api/catalogo/:id', verifyToken, requireSuperAdmin, async (req, res) => {
-  try {
-    const { peso_bulto } = req.body;
-    const result = await pool.query('UPDATE catalogo SET peso_bulto=$1 WHERE id=$2 RETURNING *', [peso_bulto, req.params.id]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Producto no encontrado' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/catalogo/:id', verifyToken, requireSuperAdmin, async (req, res) => {
-  try {
-    await pool.query('DELETE FROM catalogo WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Las escrituras del catálogo usan la ficha transaccional de Mis productos.
+for (const [method, path] of [['post','/api/catalogo'],['put','/api/catalogo/:id'],['delete','/api/catalogo/:id']]) {
+  app[method](path, verifyToken, requireSuperAdmin, (req,res) => {
+    res.status(409).json({error:'Actualiza la página y administra el catálogo desde Mis productos.'});
+  });
+}
 
 // ============================================================
 // RUTAS: ADMINISTRACIÓN (solo gerente_proy — Sergio Andrés Espinosa)
@@ -791,7 +763,7 @@ app.put('/api/solicitudes/:id', verifyToken, async (req, res) => {
 // ============================================================
 app.get('/api/inventario', verifyToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM inventario');
+    const result = await pool.query("SELECT i.* FROM inventario i WHERE NOT (i.tipo='producto_terminado' AND COALESCE(i.stock,0)=0 AND EXISTS (SELECT 1 FROM catalogo c WHERE c.nombre=i.nombre AND c.activo=FALSE))");
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -856,6 +828,7 @@ dispatchPlanner.register(app, pool, verifyToken);
 inventoryMovement.register(app, pool, verifyToken);
 orderFinance.register(app, pool, verifyToken);
 businessControl.register(app, pool, verifyToken);
+productMaster.register(app, pool, verifyToken);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
@@ -867,6 +840,7 @@ app.get('/health', (req, res) => {
 (async () => {
   await initDB();
   await businessControl.init(pool);
+  await productMaster.init(pool);
   app.listen(PORT, () => {
     console.log(`✓ Servidor corriendo en puerto ${PORT}`);
   });
