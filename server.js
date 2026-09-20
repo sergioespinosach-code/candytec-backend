@@ -6,6 +6,7 @@ const dispatchPlanner = require('./lib/dispatch-planner');
 const inventoryMovement = require('./lib/inventory-movement');
 const orderFinance = require('./lib/order-finance');
 const orderSummary = require('./lib/order-summary');
+const businessControl = require('./lib/business-control');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -854,6 +855,7 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 dispatchPlanner.register(app, pool, verifyToken);
 inventoryMovement.register(app, pool, verifyToken);
 orderFinance.register(app, pool, verifyToken);
+businessControl.register(app, pool, verifyToken);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
@@ -864,6 +866,7 @@ app.get('/health', (req, res) => {
 // ============================================================
 (async () => {
   await initDB();
+  await businessControl.init(pool);
   app.listen(PORT, () => {
     console.log(`✓ Servidor corriendo en puerto ${PORT}`);
   });
