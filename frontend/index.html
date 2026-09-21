@@ -4591,7 +4591,7 @@ function clDataRows(){
       (o.entregas||[]).forEach((e,i)=>{
         if(e.estado!=='EN_TRANSITO'&&e.estado!=='ENTREGADO') return;
         filas.push({
-          pedidoId:o.id, entregaIdx:i, cliente:o.client, vendedor:o.vendedor, fecha:e.fecha,
+          pedidoId:o.id, entregaIdx:i, cliente:o.client, vendedor:o.vendedor, fecha:e.fecha, factura:String(e.numeroFactura||'').trim(),
           valor:valorEntrega(o,e), transporte:e.costoTransporte||0, estibaje:e.costoEstibaje||0,
         });
       });
@@ -4600,7 +4600,7 @@ function clDataRows(){
       const histDespacho=[...(o.history||[])].reverse().find(h=>h.s==='EN_TRANSITO');
       const fecha=histDespacho?histDespacho.t.split(' ')[0]:(o.fechaEntrega||'—');
       filas.push({
-        pedidoId:o.id, entregaIdx:null, cliente:o.client, vendedor:o.vendedor, fecha,
+        pedidoId:o.id, entregaIdx:null, cliente:o.client, vendedor:o.vendedor, fecha, factura:String(o.factura||'').trim(),
         valor:valorFacturadoNeto(o), transporte:o.costoTransporte||0, estibaje:o.costoEstibaje||0,
       });
     }
@@ -4620,7 +4620,7 @@ function clRefresh(){
 }
 function clControlesHTML(){
   return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
-    <input id="clSearch" placeholder="Buscar por cliente o vendedor..." value="${clSearchQuery.replace(/"/g,'&quot;')}" oninput="setClSearch(this.value)" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+    <input id="clSearch" placeholder="Buscar por cliente, vendedor o factura..." value="${clSearchQuery.replace(/"/g,'&quot;')}" oninput="setClSearch(this.value)" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px">
     <div class="field" style="margin:0"><label style="font-size:11px">Desde</label><input type="date" value="${clDesde}" onchange="setClDesde(this.value)" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px"></div>
     <div class="field" style="margin:0"><label style="font-size:11px">Hasta</label><input type="date" value="${clHasta}" onchange="setClHasta(this.value)" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px"></div>
     <select onchange="setClSort(this.value)" style="padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px">
@@ -4637,7 +4637,7 @@ function clFilasFiltradas(){
   const todas=clDataRows();
   let filas=todas.slice();
   const q=clSearchQuery.trim().toLowerCase();
-  if(q) filas=filas.filter(f=>f.cliente.toLowerCase().includes(q)||(f.vendedor||'').toLowerCase().includes(q));
+  if(q) filas=filas.filter(f=>f.cliente.toLowerCase().includes(q)||(f.vendedor||'').toLowerCase().includes(q)||f.factura.toLowerCase().includes(q));
   if(clDesde) filas=filas.filter(f=>{const t=parseFecha(f.fecha); return t===null||t>=new Date(clDesde+'T00:00:00').getTime();});
   if(clHasta) filas=filas.filter(f=>{const t=parseFecha(f.fecha); return t===null||t<=new Date(clHasta+'T23:59:59').getTime();});
 
@@ -4658,7 +4658,7 @@ function clTablaSoloHTML(){
         const costo=f.transporte+f.estibaje;
         const pct=f.valor>0?(costo/f.valor*100):0;
         return `<tr>
-          <td>${f.cliente}</td>
+          <td>${bcEsc(f.cliente)}<div style="font-size:12px;color:var(--muted);margin-top:4px">Factura: ${bcEsc(f.factura||'Sin factura registrada')}</div></td>
           <td>${f.vendedor||'—'}</td>
           <td style="white-space:nowrap">${f.fecha}</td>
           <td style="text-align:right">${money(f.valor)}</td>
