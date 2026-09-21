@@ -3,13 +3,15 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const master=require('../lib/product-master');
 const data=()=>({nombre:'YumYum 5 kg',sku:'',marca:'YumYum',categoria:'Caramelo duro',familia:'Caramelo duro',peso_unitario_g:5,peso_masa_g:5,presentacion:'Funda',unidades_presentacion:1000,peso_neto_kg:5,peso_bulto:5});
 function dbFixture(role='gerente'){
- const s={catalog:[],inventory:[],audit:[],ops:[],role,fail:false};let backup;
+ const s={formulas:[{id:7}],catalog:[],inventory:[],audit:[],ops:[],role,fail:false};let backup;
  const db={release(){},async query(sql,p=[]){const result=rows=>({rows:structuredClone(rows)});
  if(sql==='BEGIN'){backup=structuredClone(s);return result([]);}if(sql==='ROLLBACK'){Object.assign(s,backup);return result([]);}if(sql==='COMMIT'||sql.includes('pg_advisory'))return result([]);
  if(sql.includes('FROM users'))return result(s.role?[{id:1,name:'Gerente',role:s.role}]:[]);
  if(sql.startsWith('SELECT * FROM business_operations'))return result(s.ops.filter(x=>x.operation_key===p[0]));
  if(sql.startsWith('SELECT * FROM catalogo'))return result(s.catalog.filter(x=>x.id===p[0]));
  if(sql.startsWith('SELECT id FROM catalogo'))return result(s.catalog.filter(x=>x.nombre.toLowerCase()===p[0].toLowerCase()&&x.id!==p[1]));
+ if(sql.startsWith('SELECT id FROM base_formulations'))return result(s.formulas.filter(x=>x.id===p[0]));
+ if(sql.startsWith('UPDATE catalogo SET formula_id')){const row=s.catalog.find(x=>x.id===p[1]);row.formula_id=p[0];return result([row]);}
  if(sql.startsWith('INSERT INTO catalogo')){if(p[1]&&s.catalog.some(x=>x.sku?.toLowerCase()===p[1].toLowerCase()))throw Object.assign(Error('duplicado'),{code:'23505'});const row={id:s.catalog.length+1,nombre:p[0],sku:p[1],ficha:JSON.parse(p[2]),peso_bulto:p[3],activo:true,version:1};s.catalog.push(row);return result([row]);}
  if(sql.startsWith("UPDATE catalogo SET sku='CT-P-'")){const r=s.catalog.find(x=>x.id===p[0]);r.sku='CT-P-'+r.id;return result([r]);}
  if(sql.startsWith('UPDATE catalogo SET sku=$1')){const r=s.catalog.find(x=>x.id===p[3]);Object.assign(r,{sku:p[0],ficha:JSON.parse(p[1]),peso_bulto:p[2],version:r.version+1});return result([r]);}
@@ -35,6 +37,15 @@ const html=fs.readFileSync(path.join(__dirname,'../frontend/index.html'),'utf8')
 test('interfaz reintenta con la misma operación sin confirmar antes del servidor',async()=>{
  let failing=true,loaded=0;const requests=[],nodes={};const ctx=vm.createContext({window:{addEventListener(){}},document:{getElementById:id=>nodes[id]||(nodes[id]={value:'',disabled:false,textContent:'',hidden:false})},crypto:{randomUUID:()=> 'product-ui-operation-0001'},confirm:()=>true,toast(){},apiPost:async(url,b)=>{requests.push(structuredClone(b));if(failing)throw Error('Sin red');return {id:1};}});
  vm.runInContext(html.slice(html.indexOf('/* Mis productos: fichas'),html.lastIndexOf('</script>')),ctx);
- vm.runInContext('PM.editor={activo:true};',ctx);ctx.pmRead=()=>data();ctx.pmLoad=async()=>{loaded++;};await ctx.pmSave('save');assert.equal(nodes.pmFields.disabled,true);assert.equal(loaded,0);assert.equal(nodes.pmSave.textContent,'Reintentar cambio');failing=false;await ctx.pmSave('save');assert.equal(requests[0].operation_key,requests[1].operation_key);assert.equal(loaded,1);
+ vm.runInContext('PM.editor={activo:true};',ctx);ctx.pmRead=()=>data();ctx.pmLoad=async()=>{loaded++;};await ctx.pmSave('save');assert.equal(nodes.pmFields.disabled,true);assert.equal(loaded,0);assert.equal(nodes.pmSaveButton.textContent,'Reintentar cambio');failing=false;await ctx.pmSave('save');assert.equal(requests[0].operation_key,requests[1].operation_key);assert.equal(loaded,1);
 });
 test('menú y protección del refresco incluyen Mis productos y scripts compilan',()=>{assert.match(html,/v:'mis-productos'/);assert.match(html,/VISTAS_FORMULARIO=\[[^;]*'mis-productos'/);for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))new vm.Script(script[1]);});
+
+test('vincula base existente y un cliente antiguo conserva la vinculación',async()=>{
+ const db=dbFixture();const r=await master.save(db,1,body({data:{...data(),formula_id:7}}));assert.equal(r.formula_id,7);
+ const edit=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002'}));assert.equal(edit.formula_id,7);
+ const clear=await master.save(db,1,body({id:1,version:2,operation_key:'product-operation-000003',data:{...data(),formula_id:null}}));assert.equal(clear.formula_id,null);
+});
+test('rechaza vínculo a una base inexistente sin crear producto',async()=>{
+ const db=dbFixture();await assert.rejects(master.save(db,1,body({data:{...data(),formula_id:999}})),/no existe/);assert.equal(db.s.catalog.length,0);
+});

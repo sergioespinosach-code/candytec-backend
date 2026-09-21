@@ -8,6 +8,7 @@ const orderFinance = require('./lib/order-finance');
 const orderSummary = require('./lib/order-summary');
 const businessControl = require('./lib/business-control');
 const productMaster = require('./lib/product-master');
+const baseFormulations = require('./lib/base-formulations');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -829,6 +830,7 @@ inventoryMovement.register(app, pool, verifyToken);
 orderFinance.register(app, pool, verifyToken);
 businessControl.register(app, pool, verifyToken);
 productMaster.register(app, pool, verifyToken);
+baseFormulations.register(app, pool, verifyToken);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
@@ -841,6 +843,7 @@ app.get('/health', (req, res) => {
   await initDB();
   await businessControl.init(pool);
   await productMaster.init(pool);
+  await baseFormulations.init(pool);
   app.listen(PORT, () => {
     console.log(`✓ Servidor corriendo en puerto ${PORT}`);
   });
