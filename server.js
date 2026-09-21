@@ -9,6 +9,7 @@ const orderSummary = require('./lib/order-summary');
 const businessControl = require('./lib/business-control');
 const productMaster = require('./lib/product-master');
 const baseFormulations = require('./lib/base-formulations');
+const productCosts = require('./lib/product-costs');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
@@ -831,6 +832,7 @@ orderFinance.register(app, pool, verifyToken);
 businessControl.register(app, pool, verifyToken);
 productMaster.register(app, pool, verifyToken);
 baseFormulations.register(app, pool, verifyToken);
+productCosts.register(app, pool, verifyToken);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });

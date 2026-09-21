@@ -49,3 +49,8 @@ test('vincula base existente y un cliente antiguo conserva la vinculación',asyn
 test('rechaza vínculo a una base inexistente sin crear producto',async()=>{
  const db=dbFixture();await assert.rejects(master.save(db,1,body({data:{...data(),formula_id:999}})),/no existe/);assert.equal(db.s.catalog.length,0);
 });
+test('costos adicionales se guardan, se auditan y sobreviven a un cliente anterior',async()=>{
+ const db=dbFixture();const extras={empaques:2,componentes:0,proceso:1};
+ const saved=await master.save(db,1,body({data:{...data(),costos_adicionales:extras}}));assert.deepEqual(saved.ficha.costos_adicionales,extras);
+ const edit=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002'}));assert.deepEqual(edit.ficha.costos_adicionales,extras);assert.deepEqual(db.s.audit[1].before.ficha.costos_adicionales,extras);
+});
