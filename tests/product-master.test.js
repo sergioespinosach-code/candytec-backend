@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const master=require('../lib/product-master');
 const data=()=>({nombre:'YumYum 5 kg',sku:'',marca:'YumYum',categoria:'Caramelo duro',familia:'Caramelo duro',peso_unitario_g:5,peso_masa_g:5,presentacion:'Funda',unidades_presentacion:1000,peso_neto_kg:5,peso_bulto:5});
 function dbFixture(role='gerente'){
- const s={formulas:[{id:7}],catalog:[],inventory:[],audit:[],ops:[],role,fail:false};let backup;
+ const s={materials:[{id:17,nombre:'Lámina YumYum',tipo:'materia_prima',unidad:'kg',costo_prom:6}],formulas:[{id:7}],catalog:[],inventory:[],audit:[],ops:[],role,fail:false};let backup;
  const db={release(){},async query(sql,p=[]){const result=rows=>({rows:structuredClone(rows)});
  if(sql==='BEGIN'){backup=structuredClone(s);return result([]);}if(sql==='ROLLBACK'){Object.assign(s,backup);return result([]);}if(sql==='COMMIT'||sql.includes('pg_advisory'))return result([]);
  if(sql.includes('FROM users'))return result(s.role?[{id:1,name:'Gerente',role:s.role}]:[]);
@@ -16,6 +16,7 @@ function dbFixture(role='gerente'){
  if(sql.startsWith("UPDATE catalogo SET sku='CT-P-'")){const r=s.catalog.find(x=>x.id===p[0]);r.sku='CT-P-'+r.id;return result([r]);}
  if(sql.startsWith('UPDATE catalogo SET sku=$1')){const r=s.catalog.find(x=>x.id===p[3]);Object.assign(r,{sku:p[0],ficha:JSON.parse(p[1]),peso_bulto:p[2],version:r.version+1});return result([r]);}
  if(sql.startsWith('INSERT INTO inventario')){if(!s.inventory.some(x=>x.nombre===p[0]))s.inventory.push({nombre:p[0],stock:0});return result([]);}
+ if(sql.startsWith('SELECT id,nombre,unidad,tipo,costo_prom FROM inventario WHERE id='))return result(s.materials.filter(x=>x.id===p[0]));
  if(sql.startsWith('SELECT stock FROM inventario'))return result(s.inventory.filter(x=>x.nombre===p[0]));
  if(sql.startsWith('UPDATE catalogo SET activo')){const r=s.catalog.find(x=>x.id===p[1]);r.activo=p[0];r.version++;return result([r]);}
  if(sql.startsWith('INSERT INTO business_audit')){if(s.fail)throw Error('Fallo de escritura');s.audit.push({before:JSON.parse(p[5]),after:JSON.parse(p[6])});return result([]);}
@@ -54,3 +55,10 @@ test('costos adicionales se guardan, se auditan y sobreviven a un cliente anteri
  const saved=await master.save(db,1,body({data:{...data(),costos_adicionales:extras}}));assert.deepEqual(saved.ficha.costos_adicionales,extras);
  const edit=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002'}));assert.deepEqual(edit.ficha.costos_adicionales,extras);assert.deepEqual(db.s.audit[1].before.ficha.costos_adicionales,extras);
 });
+
+test('lámina y rendimiento persisten con referencia de precio e historial; cliente anterior conserva configuración',async()=>{
+ const db=dbFixture();const r=await master.save(db,1,body({data:{...data(),lamina:{item_id:17,unidades_por_kg:2000},costos_adicionales:{empaques:0,componentes:0,proceso:0}}}));
+ assert.equal(r.ficha.lamina.item_id,17);assert.equal(r.ficha.lamina.costo_kg_referencia,6);assert.equal(r.ficha.lamina.unidades_por_kg,2000);assert.equal(r.ficha.costos_adicionales.empaques,0);
+ const old=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002'}));assert.equal(old.ficha.lamina.item_id,17);assert.equal(db.s.audit[1].after.ficha.lamina.nombre,'Lámina YumYum');
+});
+test('lámina inválida rechaza el guardado y no crea producto',async()=>{const db=dbFixture();await assert.rejects(master.save(db,1,body({data:{...data(),lamina:{item_id:999,unidades_por_kg:2000}}})),/no existe/);assert.equal(db.s.catalog.length,0);db.s.materials[0].unidad='L';await assert.rejects(master.save(db,1,body({data:{...data(),lamina:{item_id:17,unidades_por_kg:2000}}})),/convertir/);assert.equal(db.s.catalog.length,0);});
