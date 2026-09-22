@@ -1657,7 +1657,8 @@ function invCard(i){
     <div class="oc-body">
       <div class="cob-line"><span>Stock actual</span><b style="font-size:16px;color:${low?'var(--bad-tx)':'var(--ink)'}">${i.stock} ${i.unidad}</b></div>
       <div class="cob-line"><span>Stock mínimo</span><b>${i.minimo} ${i.unidad}</b></div>
-      ${i.tipo==='materia_prima'?`<div class="cob-line"><span>Costo promedio</span><b>${money(i.costoProm||0)} / ${i.unidad}</b></div>
+      ${i.tipo==='materia_prima'?`<div class="cob-line"><span>Costo promedio</span><b>${i.costoProm==null?'Sin precio':money(i.costoProm)} / ${i.unidad}</b></div>
+      ${i.costBasis?.method==='purchase_weighted'?`<div class="hint">Promedio de ${i.costBasis.priced_count} ingresos con precio${i.costBasis.unpriced_count?' · '+i.costBasis.unpriced_count+' ingresos sin precio excluidos':''}.</div>`:''}
       <div class="cob-line"><span>Valor en bodega</span><b>${money(i.stock*(i.costoProm||0))}</b></div>`:''}
     </div>
     <div class="oc-foot" onclick="event.stopPropagation()">
@@ -2091,7 +2092,7 @@ function openEditarMovimiento(id){
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
-      <div class="section-note" style="background:var(--warn-bg);border-color:#e8d9a8;color:var(--warn-tx)"><span class="ni">⚠</span><div>Al guardar, el stock y el costo promedio se recalculan juntos. El precio de compra corresponde a cada unidad de inventario (kg, unidad, etc.).</div></div>
+      <div class="section-note" style="background:var(--warn-bg);border-color:#e8d9a8;color:var(--warn-tx)"><span class="ni">⚠</span><div>Al corregir un ingreso de materia prima, el promedio se calcula con todos sus ingresos con precio: suma de cantidad × precio ÷ cantidad total. Las salidas no intervienen en ese promedio. Si solo cambias el precio, el stock permanece igual.</div></div>
       <div class="formgrid">
         <div class="field"><label>Tipo</label>
           <select id="em_tipo" onchange="editMovementPriceVisibility()">
@@ -2144,7 +2145,7 @@ async function confirmEditarMovimiento(id){
     if(!result.actual||!result.inventario)throw Error('Respuesta incompleta del servidor.');
     Object.assign(m,mapMovimiento(result.actual));Object.assign(it,mapInventario(result.inventario));
     movementEditState.pending=null;movementEditState.busy=false;
-    closeModal();renderView();buildNav();toast('Corrección guardada · stock y costo promedio actualizados');
+    closeModal();renderView();buildNav();toast('Corrección guardada · promedio de ingresos actualizado'+(it.costBasis?.unpriced_count?' · '+it.costBasis.unpriced_count+' ingresos sin precio excluidos':''));
   }catch(err){
     if(err.status>=400&&err.status<500){movementEditState.pending=null;fields.forEach(k=>{const el=document.getElementById(k);if(el)el.disabled=false;});}
     movementEditStatus(err.message+(movementEditState.pending?' Pulsa Reintentar para confirmar la misma corrección.':''));
@@ -5187,7 +5188,7 @@ function mapSolicitud(row){
 function mapInventario(row){
   return {id:row.id, tipo:row.tipo, nombre:row.nombre, unidad:row.unidad,
     stock:row.stock!=null?+row.stock:0, minimo:row.minimo!=null?+row.minimo:0,
-    costoProm:row.costo_prom!=null?+row.costo_prom:undefined};
+    costBasis:row.cost_basis||null,costoProm:row.costo_prom!=null?+row.costo_prom:undefined};
 }
 function mapMovimiento(row){
   return {id:row.id, itemId:row.item_id, tipo:row.tipo, cantidad:row.cantidad!=null?+row.cantidad:0,
