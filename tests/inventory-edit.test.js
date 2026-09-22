@@ -69,3 +69,33 @@ test('el editor reintenta la misma corrección y solo actualiza la vista tras co
  c.apiPut=async(url,body)=>{assert.equal(JSON.stringify(body),request);return {actual:{id:1,precio:6},inventario:{id:1,stock:200,costoProm:5}}};
  await c.confirmEditarMovimiento(1);assert.equal(c.MOVIMIENTOS[0].precio,6);assert.equal(c.INVENTARIO[0].costoProm,5);
 });
+
+test('ingreso de 25000 kg con saldo inicial cero se reconstruye a 0.66 sin depender del promedio incorrecto',()=>{
+ const sugar={...item,stock:24000,costo_prom:0.66};
+ const history=[{id:1,tipo:'ingreso',cantidad:25000,operation_payload:{precio:66}},{id:2,tipo:'consumo',cantidad:1000}];
+ const r=recalculate(sugar,history,{...next,cantidad:25000,precio:0.66});
+ assert.equal(r.stock,24000);near(r.cost,0.66);
+});
+test('el saldo inicial guardado permite reconstruir el costo aunque el promedio actual sea incorrecto',()=>{
+ const history=[{...rows[0],cost_before:{stock:100,cost:2}},...rows.slice(1)];
+ const r=recalculate({...item,costo_prom:0.01},history,{...next,precio:0.66});
+ near(r.cost,3.665);assert.equal(r.stock,200);
+});
+test('con valoración inicial conocida no exige el precio equivocado anterior para reconstruir',()=>{
+ const history=[{...rows[0],operation_payload:null,cost_before:{stock:100,cost:2}},...rows.slice(1)];
+ near(recalculate(item,history,{...next,precio:0.66}).cost,3.665);
+});
+test('la reconstrucción desde cero incorpora todas las compras y consumos posteriores',()=>{
+ const history=[{tipo:'ingreso',cantidad:25000,precio:66},{tipo:'consumo',cantidad:5000},{tipo:'ingreso',cantidad:10000,precio:0.9},{tipo:'salida',cantidad:2000}];
+ const r=recalculate({...item,stock:28000,costo_prom:0.01},history,{...next,cantidad:25000,precio:0.66});
+ near(r.cost,0.74);assert.equal(r.stock,28000);
+});
+test('si falta la valoración previa y la corrección da negativo, rechaza sin sustituir el promedio por el precio nuevo',()=>{
+ assert.throws(()=>recalculate({...item,costo_prom:0.01},rows,{...next,precio:0.66}),/falta el costo del saldo anterior/);
+});
+test('reconstrucción también revierte y conserva auditoría al guardar en transacción',async()=>{
+ const f=fixture();f.state().rows[0].cost_before={stock:100,cost:2};f.state().item.costo_prom=0.01;
+ const r=await edit(f.pool,9,1,{...next,precio:0.66});near(r.inventario.costo_prom,3.665);
+ near(f.state().audits[0].before.inventario.costo_prom,0.01);
+ near(f.state().audits[0].after.inventario.costo_prom,3.665);
+});
