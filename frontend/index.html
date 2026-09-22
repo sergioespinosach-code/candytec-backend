@@ -1754,6 +1754,7 @@ async function confirmNuevoItem(){
 let inventoryWriteVersion=0;
 const inventorySave={busy:false,pending:null};
 function openMovimiento(id,tipo){
+  if(movementEditState.busy||movementEditState.pending){toast('Confirma primero la corrección pendiente.');return;}
   if(inventorySave.busy)return;
   if(inventorySave.pending){toast('Hay un movimiento sin confirmar. Reintenta en el formulario abierto antes de iniciar otro.');return;}
   if(!puedeInventario()){toast('Solo Bodega registra movimientos de inventario');return;}
@@ -2077,7 +2078,10 @@ function viewMovimientos(){
       }).join(''):`<tr><td colspan="${puedeEditar?10:9}" style="color:var(--muted)">Sin movimientos con este filtro.</td></tr>`}
     </table>`;
 }
+let movementEditState={busy:false,pending:null};
 function openEditarMovimiento(id){
+  if(inventorySave.busy||inventorySave.pending){toast('Confirma primero el movimiento pendiente.');return;}
+  if(movementEditState.busy||movementEditState.pending){toast('Confirma la corrección pendiente antes de abrir otra.');return;}
   if(!puedeInventario()){toast('Solo Bodega edita movimientos');return;}
   const m=MOVIMIENTOS.find(x=>x.id===id); if(!m) return;
   const it=INVENTARIO.find(x=>x.id===m.itemId);
@@ -2087,10 +2091,10 @@ function openEditarMovimiento(id){
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
-      <div class="section-note" style="background:var(--warn-bg);border-color:#e8d9a8;color:var(--warn-tx)"><span class="ni">⚠</span><div>Al guardar, el stock actual del ítem se recalcula automáticamente para reflejar el cambio.</div></div>
+      <div class="section-note" style="background:var(--warn-bg);border-color:#e8d9a8;color:var(--warn-tx)"><span class="ni">⚠</span><div>Al guardar, el stock y el costo promedio se recalculan juntos. El precio de compra corresponde a cada unidad de inventario (kg, unidad, etc.).</div></div>
       <div class="formgrid">
         <div class="field"><label>Tipo</label>
-          <select id="em_tipo">
+          <select id="em_tipo" onchange="editMovementPriceVisibility()">
             <option value="ingreso" ${m.tipo==='ingreso'?'selected':''}>▲ Ingreso</option>
             <option value="salida" ${m.tipo==='salida'?'selected':''}>▼ Salida</option>
             <option value="ajuste_alza" ${m.tipo==='ajuste_alza'?'selected':''}>⚖ Ajuste (a favor)</option>
@@ -2098,39 +2102,54 @@ function openEditarMovimiento(id){
             <option value="consumo" ${m.tipo==='consumo'?'selected':''}>▼ Consumo producción</option>
           </select></div>
         <div class="field"><label>Cantidad (${it?it.unidad:''})</label><input id="em_cantidad" type="number" min="0" step="0.01" value="${m.cantidad}"></div>
-        <div class="field full"><label>Motivo</label><input id="em_motivo" value="${(m.motivo||'').replace(/"/g,'&quot;')}"></div>
+        ${it&&it.tipo==='materia_prima'?`<div class="field" id="em_price_field"><label>Precio de ingreso por ${bcEsc(it.unidad)} ($)</label><input id="em_precio" type="number" min="0.000001" step="any" value="${m.precio??''}"><div class="hint">Precio de compra por unidad, no el total de la compra.</div></div>`:''}
+        <div class="field full"><label>Motivo de la corrección</label><input id="em_motivo" value="${(m.motivo||'').replace(/"/g,'&quot;')}"></div>
       </div>
     </div>
+    <div id="em_status" role="status" aria-live="polite" style="padding:0 24px;white-space:pre-wrap"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-gold" onclick="confirmEditarMovimiento(${id})">Guardar y recalcular stock</button>
+      <button class="btn btn-gold" id="em_save_button" onclick="confirmEditarMovimiento(${id})">Guardar y recalcular</button>
     </div>`;
+  editMovementPriceVisibility();
   document.getElementById('overlay').classList.add('open');
 }
+function editMovementPriceVisibility(){
+  const field=document.getElementById('em_price_field');
+  if(field)field.style.display=document.getElementById('em_tipo').value==='ingreso'?'':'none';
+}
+function movementEditStatus(message){const el=document.getElementById('em_status');if(el)el.textContent=message;}
 async function confirmEditarMovimiento(id){
-  if(guardDouble('confirmEditarMovimiento')) return;
+  if(movementEditState.busy)return;
+  if(!puedeInventario()){toast('Solo Bodega y Gerencia editan movimientos');return;}
+  const m=MOVIMIENTOS.find(x=>x.id===id);if(!m)return;
+  const it=INVENTARIO.find(x=>x.id===m.itemId);if(!it)return;
+  if(!movementEditState.pending){
+    const tipo=document.getElementById('em_tipo').value,cantidad=Number(document.getElementById('em_cantidad').value);
+    const motivo=document.getElementById('em_motivo').value.trim();
+    const precio=it.tipo==='materia_prima'&&tipo==='ingreso'?Number(document.getElementById('em_precio').value):null;
+    if(!Number.isFinite(cantidad)||cantidad<=0){movementEditStatus('Ingresa una cantidad válida.');return;}
+    if(!motivo){movementEditStatus('Escribe el motivo de la corrección.');return;}
+    if(precio!==null&&(!Number.isFinite(precio)||precio<=0)){movementEditStatus('Ingresa un precio mayor que cero por '+it.unidad+'.');return;}
+    movementEditState.pending={id,body:{tipo,cantidad,motivo,precio,version:m.editVersion||0,operation_key:typeof crypto.randomUUID==='function'?crypto.randomUUID():'edit-'+Date.now()+'-'+Math.random().toString(36).slice(2)}};
+  }
+  const pending=movementEditState.pending;
+  movementEditState.busy=true;inventoryWriteVersion++;
+  const fields=['em_tipo','em_cantidad','em_motivo','em_precio'];
+  fields.forEach(k=>{const el=document.getElementById(k);if(el)el.disabled=true;});
+  const button=document.getElementById('em_save_button');button.disabled=true;
+  movementEditStatus('Guardando corrección…');
   try{
-    if(!puedeInventario()){toast('Solo Bodega edita movimientos');return;}
-    const m=MOVIMIENTOS.find(x=>x.id===id); if(!m) return;
-    const it=INVENTARIO.find(x=>x.id===m.itemId); if(!it){toast('El ítem de este movimiento ya no existe');return;}
-    const nuevoTipo=document.getElementById('em_tipo').value;
-    const nuevaCantidad=parseFloat(document.getElementById('em_cantidad').value);
-    const nuevoMotivo=document.getElementById('em_motivo').value.trim();
-    if(!nuevaCantidad||nuevaCantidad<=0){toast('Ingresa una cantidad válida');return;}
-    if(!nuevoMotivo){toast('El motivo es obligatorio');return;}
-    // revertir el efecto viejo y aplicar el nuevo sobre el stock actual
-    const stockSinElViejo=it.stock-tipoSigno(m.tipo)*m.cantidad;
-    const stockConElNuevo=+(stockSinElViejo+tipoSigno(nuevoTipo)*nuevaCantidad).toFixed(2);
-    if(stockConElNuevo<0){toast('Ese cambio dejaría el stock en negativo — revisa la cantidad');return;}
-    try{
-      await apiPut('/api/movimientos/'+id,{tipo:nuevoTipo,cantidad:nuevaCantidad,motivo:nuevoMotivo});
-      await apiPut('/api/inventario/'+it.id,{stock:stockConElNuevo});
-    }catch(err){ toast('No se pudo guardar el cambio: '+err.message); return; }
-    m.tipo=nuevoTipo; m.cantidad=nuevaCantidad; m.motivo=nuevoMotivo;
-    it.stock=stockConElNuevo;
-    closeModal();renderView();buildNav();
-    toast('Movimiento actualizado · stock recalculado: '+it.stock+' '+it.unidad);
-  }finally{ releaseGuard('confirmEditarMovimiento'); }
+    const result=await apiPut('/api/movimientos/'+pending.id,pending.body);
+    if(!result.actual||!result.inventario)throw Error('Respuesta incompleta del servidor.');
+    Object.assign(m,mapMovimiento(result.actual));Object.assign(it,mapInventario(result.inventario));
+    movementEditState.pending=null;movementEditState.busy=false;
+    closeModal();renderView();buildNav();toast('Corrección guardada · stock y costo promedio actualizados');
+  }catch(err){
+    if(err.status>=400&&err.status<500){movementEditState.pending=null;fields.forEach(k=>{const el=document.getElementById(k);if(el)el.disabled=false;});}
+    movementEditStatus(err.message+(movementEditState.pending?' Pulsa Reintentar para confirmar la misma corrección.':''));
+    button.textContent=movementEditState.pending?'Reintentar':'Guardar y recalcular';
+  }finally{movementEditState.busy=false;inventoryWriteVersion++;button.disabled=false;}
 }
 
 /* ============================================================
@@ -2746,7 +2765,7 @@ function modalActions(o){
   if(!acts.length) return '';
   return `<div class="modal-actions">${acts.join('')}</div>`;
 }
-function closeModal(){if(financeSaving||financeEditor?.pending){toast('Espera la confirmación del ajuste o pulsa Reintentar.');return;}financeEditor=null;if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
+function closeModal(){if(movementEditState.busy||movementEditState.pending){movementEditStatus('Confirma la corrección con Reintentar antes de cerrar.');return;}if(financeSaving||financeEditor?.pending){toast('Espera la confirmación del ajuste o pulsa Reintentar.');return;}financeEditor=null;if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
 document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
 function eliminarPedido(id){
   if(currentRole!=='gerente_proy'){toast('Solo tú puedes eliminar pedidos');return;}
@@ -5172,6 +5191,7 @@ function mapInventario(row){
 }
 function mapMovimiento(row){
   return {id:row.id, itemId:row.item_id, tipo:row.tipo, cantidad:row.cantidad!=null?+row.cantidad:0,
+    precio:row.precio!=null?Number(row.precio):(Number(row.edit_version||0)===0&&row.operation_payload?.precio!=null?Number(row.operation_payload.precio):null), editVersion:Number(row.edit_version||0),
     motivo:row.motivo, usuario:row.usuario, fecha:row.fecha?fmtDateTimeDB(row.fecha):''};
 }
 
@@ -5198,9 +5218,9 @@ async function loadAllData(){
   CLIENTES.length=0; clientesR.forEach(r=>CLIENTES.push(mapCliente(r)));
   if(financialVersionAtStart===(typeof financialWriteVersion==='undefined'?0:financialWriteVersion)&&(typeof financeSaving==='undefined'||!financeSaving)&&(typeof financeEditor==='undefined'||(!financeEditor&&financialEditorAtStart===financeEditor)))ORDERS = pedidosR.map(mapPedido);
   PRODUCCIONES.length=0; produccionesR.forEach(r=>PRODUCCIONES.push(mapProduccion(r)));
-  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
+  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
   SOLICITUDES.length=0; solicitudesR.forEach(r=>SOLICITUDES.push(mapSolicitud(r)));
-  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy){INVENTARIO.length=0; inventarioR.forEach(r=>INVENTARIO.push(mapInventario(r)));}
+  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy){INVENTARIO.length=0; inventarioR.forEach(r=>INVENTARIO.push(mapInventario(r)));}
   if(Array.isArray(catalogoR)){ CATALOGO.length=0; catalogoR.forEach(r=>CATALOGO.push(r.nombre)); CATALOGO_IDS=catalogoR; }
 }
 let CATALOGO_IDS=[];

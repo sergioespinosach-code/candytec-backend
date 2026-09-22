@@ -4,6 +4,7 @@ dotenv.config();
 const express = require('express');
 const dispatchPlanner = require('./lib/dispatch-planner');
 const inventoryMovement = require('./lib/inventory-movement');
+const inventoryEdit = require('./lib/inventory-edit');
 const orderFinance = require('./lib/order-finance');
 const orderSummary = require('./lib/order-summary');
 const businessControl = require('./lib/business-control');
@@ -703,22 +704,10 @@ app.post('/api/movimientos', verifyToken, async (req, res) => {
 
 app.put('/api/movimientos/:id', verifyToken, async (req, res) => {
   try {
-    const current = await pool.query('SELECT * FROM movimientos WHERE id = $1', [req.params.id]);
-    if (!current.rows.length) return res.status(404).json({ error: 'Movimiento no encontrado' });
-    const row = current.rows[0];
-    const b = req.body;
-    const merged = {
-      tipo: b.tipo !== undefined ? b.tipo : row.tipo,
-      cantidad: b.cantidad !== undefined ? b.cantidad : row.cantidad,
-      motivo: b.motivo !== undefined ? b.motivo : row.motivo,
-    };
-    const result = await pool.query(
-      'UPDATE movimientos SET tipo=$1, cantidad=$2, motivo=$3 WHERE id=$4 RETURNING *',
-      [merged.tipo, merged.cantidad, merged.motivo, req.params.id]
-    );
-    res.json({ anterior: row, actual: result.rows[0] });
+    res.set('Cache-Control','no-store').json(await inventoryEdit.edit(pool,req.user.userId,req.params.id,req.body||{}));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if(!err.status) console.error('inventory edit:',err);
+    res.status(err.status||500).json({error:err.status?err.message:'No se pudo confirmar la corrección. Reintenta con el mismo formulario.'});
   }
 });
 
@@ -843,6 +832,7 @@ app.get('/health', (req, res) => {
 // ============================================================
 (async () => {
   await initDB();
+  await inventoryEdit.init(pool);
   await businessControl.init(pool);
   await productMaster.init(pool);
   await baseFormulations.init(pool);
