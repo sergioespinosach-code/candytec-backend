@@ -948,7 +948,8 @@ const gerNav=[
   {v:'todos-g', ic:'▦', label:'Pedidos', count:o=>o.length},
   {v:'cobranzas', ic:'$', label:'Cobranzas', count:o=>o.filter(x=>x.pago&&x.pago.estado!=='pagado').length},
   {v:'completados', ic:'✓', label:'Completados', count:o=>o.filter(x=>esCompletado(x)).length},
-  {v:'bodega-mp', ic:'▤', label:'Bodega M. Primas', count:()=>INVENTARIO.filter(i=>i.tipo==='materia_prima'&&i.stock<i.minimo).length},
+  {v:'bodega-mp', ic:'▤', label:'Bodega M. Primas', count:()=>INVENTARIO.filter(i=>invWarehouse(i)==='materia_prima'&&i.stock<i.minimo).length},
+  {v:'bodega-empaques',ic:'▧',label:'Bodega Láminas y Cajas',count:()=>INVENTARIO.filter(i=>invWarehouse(i)==='laminas_cajas'&&i.stock<i.minimo).length},
   {v:'bodega-pt', ic:'▥', label:'Bodega P. Terminado', count:()=>INVENTARIO.filter(i=>i.tipo==='producto_terminado'&&i.stock<i.minimo).length},
   {v:'movimientos', ic:'☰', label:'Movimientos', count:()=>MOVIMIENTOS.length},
   {v:'por-completar', ic:'◪', label:'Pedidos por completar', count:o=>o.filter(esPedidoPorCompletar).length},
@@ -990,7 +991,8 @@ const NAV = {
     {v:'pedidos-produccion', ic:'▦', label:'Estado de pedidos', count:o=>o.length},
     {v:'por-completar', ic:'◪', label:'Pedidos por completar', count:o=>o.filter(esPedidoPorCompletar).length},
     {v:'produccion-logistica', ic:'◫', label:'Producción y logística', count:()=>pedidosPorFabricar().length},
-    {v:'bodega-mp', ic:'▧', label:'Bodega materias primas', count:()=>INVENTARIO.filter(i=>i.tipo==='materia_prima'&&i.stock<i.minimo).length},
+    {v:'bodega-mp', ic:'▧', label:'Bodega materias primas', count:()=>INVENTARIO.filter(i=>invWarehouse(i)==='materia_prima'&&i.stock<i.minimo).length},
+  {v:'bodega-empaques',ic:'▧',label:'Bodega Láminas y Cajas',count:()=>INVENTARIO.filter(i=>invWarehouse(i)==='laminas_cajas'&&i.stock<i.minimo).length},
     {v:'bodega-pt', ic:'▥', label:'Bodega producto terminado', count:()=>INVENTARIO.filter(i=>i.tipo==='producto_terminado'&&i.stock<i.minimo).length},
   ],
   bodega:[
@@ -998,7 +1000,8 @@ const NAV = {
     {v:'por-despachar', ic:'▲', label:'Por despachar', count:o=>o.filter(x=>x.state==='POR_ENTREGAR').length},
     {v:'en-transito', ic:'◷', label:'Producto en tránsito', count:o=>o.filter(x=>x.state==='EN_TRANSITO').length},
     {v:'entregados', ic:'✓', label:'Productos entregados', count:o=>o.filter(x=>x.state==='ENTREGADO').length},
-    {v:'bodega-mp', ic:'▧', label:'Bodega M. Primas', count:()=>INVENTARIO.filter(i=>i.tipo==='materia_prima'&&i.stock<i.minimo).length},
+    {v:'bodega-mp', ic:'▧', label:'Bodega M. Primas', count:()=>INVENTARIO.filter(i=>invWarehouse(i)==='materia_prima'&&i.stock<i.minimo).length},
+  {v:'bodega-empaques',ic:'▧',label:'Bodega Láminas y Cajas',count:()=>INVENTARIO.filter(i=>invWarehouse(i)==='laminas_cajas'&&i.stock<i.minimo).length},
     {v:'por-completar', ic:'◪', label:'Pedidos por completar', count:o=>o.filter(esPedidoPorCompletar).length},
     {v:'bodega-pt', ic:'▥', label:'Bodega P. Terminado', count:()=>INVENTARIO.filter(i=>i.tipo==='producto_terminado'&&i.stock<i.minimo).length},
     {v:'movimientos', ic:'☰', label:'Movimientos', count:()=>MOVIMIENTOS.length},
@@ -1086,6 +1089,7 @@ function renderView(){
   else if(v==='clientes'){ html=viewClientes(true); }
   else if(v==='clientes-todos'){ html=viewClientes(false); }
   else if(v==='bodega-mp'){ html=viewInventario('materia_prima'); }
+  else if(v==='bodega-empaques'){ html=viewInventario('laminas_cajas'); }
   else if(v==='bodega-pt'){ html=viewInventario('producto_terminado'); }
   else if(v==='movimientos'){ html=viewMovimientos(); }
   else if(v==='dashboard') html=viewDashboard();
@@ -1596,12 +1600,32 @@ function viewIngresosPrevios(){
     <div id="ipTable">${ipTableHTML()}</div>`;
 }
 
+function invWarehouse(i){return i.tipo==='materia_prima'?(i.bodega==='laminas_cajas'?'laminas_cajas':'materia_prima'):i.tipo;}
+function invWarehouseLabel(i){return invWarehouse(i)==='laminas_cajas'?'Láminas y Cajas':i.tipo==='materia_prima'?'Materia prima':'Producto terminado';}
+const warehouseMove={busy:false,pending:null};
+async function moveItemWarehouse(id){
+ if(warehouseMove.busy)return;
+ if(!puedeInventario())return;
+ const item=INVENTARIO.find(i=>i.id===id);if(!item)return;
+ if(warehouseMove.pending&&warehouseMove.pending.id!==id){toast('Reintenta primero el cambio de bodega pendiente.');return;}
+ if(!warehouseMove.pending){
+  const desde=item.bodega||'materias_primas',bodega=desde==='laminas_cajas'?'materias_primas':'laminas_cajas';
+  if(!confirm('¿Mover '+item.nombre+' a '+(bodega==='laminas_cajas'?'Láminas y Cajas':'Materias Primas')+'? Se conservarán sus existencias, costo e historial.'))return;
+  warehouseMove.pending={id,body:{desde,bodega,operation_key:crypto.randomUUID()}};
+ }
+ warehouseMove.busy=true;inventoryWriteVersion++;
+ try{
+  const r=await apiPost('/api/inventario/'+id+'/bodega',warehouseMove.pending.body);
+  item.bodega=r.bodega;warehouseMove.pending=null;renderView();buildNav();toast('Material cambiado de bodega. Existencias e historial conservados.');
+ }catch(e){if(e.status>=400&&e.status<500)warehouseMove.pending=null;toast(e.message+(warehouseMove.pending?' Pulsa de nuevo Mover para reintentar.':''));}
+ finally{warehouseMove.busy=false;inventoryWriteVersion++;}
+}
 let invSortMode='alfa';
 let invSearchQuery='';
 function setInvSort(v){invSortMode=v;invGridRefresh();}
 function setInvSearch(v){invSearchQuery=v;invGridRefresh();}
 function invGridRefresh(){
-  const tipo=currentView==='bodega-mp'?'materia_prima':'producto_terminado';
+  const tipo=currentView==='bodega-empaques'?'laminas_cajas':currentView==='bodega-mp'?'materia_prima':'producto_terminado';
   const el=document.getElementById('invGrid'); if(el) el.innerHTML=invGridHTML(tipo);
 }
 function fmtPeso(v){ return v==null||v===''?'':+parseFloat(v); }
@@ -1615,22 +1639,22 @@ function ordenarInventario(list){
   return arr;
 }
 function invGridHTML(tipo){
-  let list=INVENTARIO.filter(i=>i.tipo===tipo);
+  let list=INVENTARIO.filter(i=>invWarehouse(i)===tipo);
   const q=invSearchQuery.trim().toLowerCase();
   if(q) list=list.filter(i=>i.nombre.toLowerCase().includes(q));
   list=ordenarInventario(list);
   return list.length?list.map(i=>invCard(i)).join(''):`<div class="empty" style="grid-column:1/-1"><div class="ei">▤</div><h3>${q?'Nada coincide':'Sin ítems'}</h3><p>${q?'Prueba con otro nombre o borra la búsqueda.':'Crea el primer ítem de esta bodega.'}</p></div>`;
 }
 function viewInventario(tipo){
-  const esMP=tipo==='materia_prima';
-  const list=ordenarInventario(INVENTARIO.filter(i=>i.tipo===tipo));
+  const esMP=tipo==='materia_prima'||tipo==='laminas_cajas';
+  const list=ordenarInventario(INVENTARIO.filter(i=>invWarehouse(i)===tipo));
   const bajos=list.filter(i=>i.stock<i.minimo);
   const valor=esMP?list.reduce((a,i)=>a+i.stock*(i.costoProm||0),0):0;
-  return pageHead(esMP?'Bodega de materias primas':'Bodega de producto terminado',(esMP?'Insumos con costo promedio por unidad · movimientos a cargo de Bodega':'La producción ingresa desde el Jefe · salidas y ajustes los registra Bodega'))
+  return pageHead(tipo==='laminas_cajas'?'Bodega de Láminas y Cajas':esMP?'Bodega de materias primas':'Bodega de producto terminado',(esMP?'Insumos con costo promedio por unidad · movimientos a cargo de Bodega':'La producción ingresa desde el Jefe · salidas y ajustes los registra Bodega'))
   + `<div class="stat-row" style="margin-bottom:16px">
       <div class="stat"><div class="sbar" style="background:var(--s-bodega)"></div><div class="sv">${list.length}</div><div class="sl">Ítems registrados</div></div>
       <div class="stat"><div class="sbar" style="background:${bajos.length?'var(--s-devuelto)':'var(--s-entregado)'}"></div><div class="sv">${bajos.length}</div><div class="sl">Bajo stock mínimo</div></div>
-      ${esMP?`<div class="stat"><div class="sbar" style="background:var(--s-entregado)"></div><div class="sv">${money(valor)}</div><div class="sl">Valor del inventario MP</div></div>`
+      ${esMP?`<div class="stat"><div class="sbar" style="background:var(--s-entregado)"></div><div class="sv">${money(valor)}</div><div class="sl">Valor de esta bodega</div></div>`
             :`<div class="stat"><div class="sbar" style="background:var(--s-produciendo)"></div><div class="sv">${MOVIMIENTOS.length}</div><div class="sl">Movimientos registrados</div></div>`}
     </div>`
   + `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
@@ -1652,7 +1676,7 @@ function invCard(i){
   return `<div class="ocard ${low?'is-returned':''}" onclick="openItemMovs(${i.id})">
     ${low?'<div class="returned-flag">Bajo stock mínimo</div>':''}
     <div class="oc-top"><div class="oc-row">
-      <div><div class="oc-id" style="font-size:14px">${i.nombre}</div><div class="oc-client">${i.tipo==='materia_prima'?'Materia prima':'Producto terminado'}</div></div>
+      <div><div class="oc-id" style="font-size:14px">${i.nombre}</div><div class="oc-client">${invWarehouseLabel(i)}</div></div>
     </div></div>
     <div class="oc-body">
       <div class="cob-line"><span>Stock actual</span><b style="font-size:16px;color:${low?'var(--bad-tx)':'var(--ink)'}">${i.stock} ${i.unidad}</b></div>
@@ -1667,6 +1691,7 @@ function invCard(i){
         <button class="btn btn-sm" onclick="event.stopPropagation();openMovimiento(${i.id},'ingreso')">▲ Ingreso</button>
         <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();openMovimiento(${i.id},'salida')">▼ Salida</button>
         <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openAjuste(${i.id})">⚖ Ajuste</button>
+        ${i.tipo==='materia_prima'?`<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();moveItemWarehouse(${i.id})">${i.bodega==='laminas_cajas'?'Mover a Materias Primas':'Mover a Láminas y Cajas'}</button>`:''}
       </div>`:`<span class="chip">Solo consulta</span>`}
     </div>
   </div>`;
@@ -1698,15 +1723,15 @@ function openAjuste(id){
 function openNuevoItem(tipo){
   if(!puedeInventario()){toast('Solo Bodega registra ítems y movimientos');return;}
   itemTipoChoice=tipo;
-  const esMP=tipo==='materia_prima';
+  const esMP=tipo==='materia_prima'||tipo==='laminas_cajas';
   document.getElementById('modal').innerHTML=`
     <div class="modal-head">
-      <div><div class="mh-id">Nuevo ítem</div><div class="mh-client">${esMP?'Bodega de materias primas':'Bodega de producto terminado'}</div></div>
+      <div><div class="mh-id">Nuevo ítem</div><div class="mh-client">${tipo==='laminas_cajas'?'Bodega de Láminas y Cajas':esMP?'Bodega de materias primas':'Bodega de producto terminado'}</div></div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
       <div class="formgrid">
-        <div class="field full"><label>Nombre del ítem</label><input id="i_nombre" placeholder="${esMP?'Ej. Azúcar refinada':'Ej. YumYum Caramelo duro 10Kg.'}"></div>
+        <div class="field full"><label>Nombre del ítem</label><input id="i_nombre" placeholder="${tipo==='laminas_cajas'?'Ej. Lámina YumYum o caja de cartón':esMP?'Ej. Azúcar refinada':'Ej. YumYum Caramelo duro 10Kg.'}"></div>
         <div class="field"><label>Unidad de medida</label><input id="i_unidad" placeholder="${esMP?'kg, L...':'cajas, fundones...'}"></div>
         <div class="field"><label>Stock inicial</label><input id="i_stock" type="number" min="0" placeholder="0"></div>
         <div class="field"><label>Stock mínimo (alerta)</label><input id="i_minimo" type="number" min="0" placeholder="0"></div>
@@ -1728,7 +1753,7 @@ async function confirmNuevoItem(){
     const unidad=document.getElementById('i_unidad').value.trim();
     const stock=parseFloat(document.getElementById('i_stock').value)||0;
     const minimo=parseFloat(document.getElementById('i_minimo').value)||0;
-    const esMP=itemTipoChoice==='materia_prima';
+    const esMP=itemTipoChoice==='materia_prima'||itemTipoChoice==='laminas_cajas';
     const precioEl=document.getElementById('i_precio');
     const precio=precioEl?(parseFloat(precioEl.value)||0):0;
     if(!nombre){toast('Ingresa el nombre del ítem');return;}
@@ -1737,7 +1762,7 @@ async function confirmNuevoItem(){
     if(INVENTARIO.some(x=>x.nombre.toLowerCase()===nombre.toLowerCase())){toast('Ya existe un ítem con ese nombre');return;}
     let row;
     try{
-      row=await apiPost('/api/inventario',{tipo:itemTipoChoice,nombre,unidad,stock,minimo,costo_prom:esMP?precio:null});
+      row=await apiPost('/api/inventario',{tipo:esMP?'materia_prima':itemTipoChoice,bodega:itemTipoChoice==='laminas_cajas'?'laminas_cajas':'materias_primas',nombre,unidad,stock,minimo,costo_prom:esMP?precio:null});
     }catch(err){ toast('No se pudo guardar en el servidor: '+err.message); return; }
     const item=mapInventario(row);
     INVENTARIO.push(item);
@@ -1834,7 +1859,7 @@ function openItemMovs(id){
   const movs=MOVIMIENTOS.filter(m=>m.itemId===id).slice().reverse();
   document.getElementById('modal').innerHTML=`
     <div class="modal-head">
-      <div><div class="mh-id">${i.nombre}</div><div class="mh-client">${i.tipo==='materia_prima'?'Materia prima':'Producto terminado'} · Kardex de movimientos</div></div>
+      <div><div class="mh-id">${i.nombre}</div><div class="mh-client">${invWarehouseLabel(i)} · Kardex de movimientos</div></div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
@@ -2035,7 +2060,7 @@ function viewMovimientos(){
   let list=MOVIMIENTOS.slice().reverse();
   if(movFilter==='ingreso'||movFilter==='salida') list=list.filter(m=>m.tipo===movFilter);
   if(movFilter==='ajuste') list=list.filter(m=>m.tipo==='ajuste_alza'||m.tipo==='ajuste_baja');
-  if(movFilter==='mp') list=list.filter(m=>{const it=INVENTARIO.find(x=>x.id===m.itemId);return it&&it.tipo==='materia_prima';});
+  if(movFilter==='mp'||movFilter==='empaques') list=list.filter(m=>{const it=INVENTARIO.find(x=>x.id===m.itemId);return it&&invWarehouse(it)===(movFilter==='mp'?'materia_prima':'laminas_cajas');});
   if(movFilter==='pt') list=list.filter(m=>{const it=INVENTARIO.find(x=>x.id===m.itemId);return it&&it.tipo==='producto_terminado';});
   if(movProducto!=='todos') list=list.filter(m=>String(m.itemId)===movProducto);
   const valorIn=MOVIMIENTOS.filter(m=>m.tipo==='ingreso'&&m.precio).reduce((a,m)=>a+m.cantidad*m.precio,0);
@@ -2052,7 +2077,7 @@ function viewMovimientos(){
       <div class="stat"><div class="sbar" style="background:var(--s-listo)"></div><div class="sv">${money(valorIn)}</div><div class="sl">Compras de MP valorizadas</div></div>
     </div>`
   + `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
-      <div class="filters" style="margin:0">${[['todos','Todos'],['ingreso','Ingresos'],['salida','Salidas'],['ajuste','Ajustes'],['mp','Materias primas'],['pt','Prod. terminado']].map(([k,l])=>`<button class="fchip ${movFilter===k?'on':''}" onclick="setMovFilter('${k}')">${l}</button>`).join('')}</div>
+      <div class="filters" style="margin:0">${[['todos','Todos'],['ingreso','Ingresos'],['salida','Salidas'],['ajuste','Ajustes'],['mp','Materias primas'],['empaques','Láminas y Cajas'],['pt','Prod. terminado']].map(([k,l])=>`<button class="fchip ${movFilter===k?'on':''}" onclick="setMovFilter('${k}')">${l}</button>`).join('')}</div>
       <select onchange="setMovProducto(this.value)" style="margin-left:auto;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-width:220px">
         <option value="todos" ${movProducto==='todos'?'selected':''}>Todos los productos</option>
         ${itemsConMov.map(i=>`<option value="${i.id}" ${movProducto===String(i.id)?'selected':''}>${i.nombre}</option>`).join('')}
@@ -2067,7 +2092,7 @@ function viewMovimientos(){
         return `<tr>
           <td style="white-space:nowrap">${m.fecha}</td>
           <td>${it?it.nombre:'—'}</td>
-          <td>${esMP?'MP':'PT'}</td>
+          <td>${it?invWarehouseLabel(it):'—'}</td>
           <td style="color:${positivo?'var(--ok-tx)':'var(--bad-tx)'};font-weight:600">${tipoLabel(m.tipo)}</td>
           <td style="text-align:right">${m.cantidad} ${it?it.unidad:''}</td>
           <td style="text-align:right">${m.precio?money(m.precio):'—'}</td>
@@ -4128,7 +4153,7 @@ function exportarExcelCompleto(){
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(clientesData),'Clientes');
 
   const invData=INVENTARIO.map(i=>({
-    'Tipo':i.tipo==='materia_prima'?'Materia prima':'Producto terminado','Nombre':i.nombre,'Unidad':i.unidad,
+    'Tipo':invWarehouseLabel(i),'Nombre':i.nombre,'Unidad':i.unidad,
     'Stock':i.stock,'Stock mínimo':i.minimo,'Costo promedio':i.costoProm||'',
   }));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(invData),'Inventario');
@@ -4963,7 +4988,7 @@ const NAV_GROUPS = [
   {id:'ventas',label:'Ventas y clientes',icon:'◎',views:['nuevo','mis-pedidos','todos-g','todos','por-completar','completados','completados-v','clientes','clientes-todos']},
   {id:'finanzas',label:'Facturación y gastos',icon:'$',views:['por-facturar','cobranzas','cobranzas-v','control-gastos','mis-movimientos']},
   {id:'productos',label:'Productos y costos',icon:'▦',views:['mis-productos','formulaciones','centro-costos']},
-  {id:'bodega',label:'Producción y bodega',icon:'▤',views:['produccion','ingresos-previos','consumo-mp','pedidos-produccion','bodega-mp','bodega-pt','movimientos']},
+  {id:'bodega',label:'Producción y bodega',icon:'▤',views:['produccion','ingresos-previos','consumo-mp','pedidos-produccion','bodega-mp','bodega-empaques','bodega-pt','movimientos']},
   {id:'despachos',label:'Despachos y logística',icon:'◫',views:['planificador-despachos','produccion-logistica','producto-listo','por-despachar','en-transito','entregados','costos-logisticos']},
   {id:'administracion',label:'Administración',icon:'⚙',views:['configuracion']},
 ];
@@ -5188,7 +5213,7 @@ function mapSolicitud(row){
 function mapInventario(row){
   return {id:row.id, tipo:row.tipo, nombre:row.nombre, unidad:row.unidad,
     stock:row.stock!=null?+row.stock:0, minimo:row.minimo!=null?+row.minimo:0,
-    costBasis:row.cost_basis||null,costoProm:row.costo_prom!=null?+row.costo_prom:undefined};
+    bodega:row.bodega||'materias_primas',costBasis:row.cost_basis||null,costoProm:row.costo_prom!=null?+row.costo_prom:undefined};
 }
 function mapMovimiento(row){
   return {id:row.id, itemId:row.item_id, tipo:row.tipo, cantidad:row.cantidad!=null?+row.cantidad:0,
@@ -5219,9 +5244,9 @@ async function loadAllData(){
   CLIENTES.length=0; clientesR.forEach(r=>CLIENTES.push(mapCliente(r)));
   if(financialVersionAtStart===(typeof financialWriteVersion==='undefined'?0:financialWriteVersion)&&(typeof financeSaving==='undefined'||!financeSaving)&&(typeof financeEditor==='undefined'||(!financeEditor&&financialEditorAtStart===financeEditor)))ORDERS = pedidosR.map(mapPedido);
   PRODUCCIONES.length=0; produccionesR.forEach(r=>PRODUCCIONES.push(mapProduccion(r)));
-  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
+  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy&&!warehouseMove.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
   SOLICITUDES.length=0; solicitudesR.forEach(r=>SOLICITUDES.push(mapSolicitud(r)));
-  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy){INVENTARIO.length=0; inventarioR.forEach(r=>INVENTARIO.push(mapInventario(r)));}
+  if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy&&!warehouseMove.busy){INVENTARIO.length=0; inventarioR.forEach(r=>INVENTARIO.push(mapInventario(r)));}
   if(Array.isArray(catalogoR)){ CATALOGO.length=0; catalogoR.forEach(r=>CATALOGO.push(r.nombre)); CATALOGO_IDS=catalogoR; }
 }
 let CATALOGO_IDS=[];

@@ -5,6 +5,7 @@ const express = require('express');
 const dispatchPlanner = require('./lib/dispatch-planner');
 const inventoryMovement = require('./lib/inventory-movement');
 const inventoryEdit = require('./lib/inventory-edit');
+const inventoryWarehouse = require('./lib/inventory-warehouse');
 const orderFinance = require('./lib/order-finance');
 const orderSummary = require('./lib/order-summary');
 const businessControl = require('./lib/business-control');
@@ -764,9 +765,11 @@ app.get('/api/inventario', verifyToken, async (req, res) => {
 app.post('/api/inventario', verifyToken, async (req, res) => {
   try {
     const { tipo, nombre, unidad, stock, minimo, costo_prom } = req.body;
+    const bodega=req.body.bodega||'materias_primas';
+    if(!['materias_primas','laminas_cajas'].includes(bodega)||(bodega==='laminas_cajas'&&tipo!=='materia_prima'))return res.status(400).json({error:'Bodega inválida para este material.'});
     const result = await pool.query(
-      'INSERT INTO inventario (tipo, nombre, unidad, stock, minimo, costo_prom) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [tipo, nombre, unidad, stock, minimo, costo_prom]
+      'INSERT INTO inventario (tipo, nombre, unidad, stock, minimo, costo_prom, bodega) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [tipo, nombre, unidad, stock, minimo, costo_prom, bodega]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -817,6 +820,7 @@ app.post('/api/upload', verifyToken, upload.single('file'), async (req, res) => 
 // ============================================================
 dispatchPlanner.register(app, pool, verifyToken);
 inventoryMovement.register(app, pool, verifyToken);
+inventoryWarehouse.register(app,pool,verifyToken);
 orderFinance.register(app, pool, verifyToken);
 businessControl.register(app, pool, verifyToken);
 productMaster.register(app, pool, verifyToken);
@@ -834,6 +838,7 @@ app.get('/health', (req, res) => {
   await initDB();
   await inventoryEdit.init(pool);
   await businessControl.init(pool);
+  await inventoryWarehouse.init(pool);
   await productMaster.init(pool);
   await baseFormulations.init(pool);
   app.listen(PORT, () => {
