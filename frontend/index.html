@@ -2893,8 +2893,12 @@ function updateEditTotals(){
   });
   const oEdit=ORDERS.find(x=>x.id===editPedidoId);
   const tasa=oEdit&&oEdit.ivaTasa!=null?oEdit.ivaTasa:15;
-  const iva=sub*(tasa/100);
-  const tEl=document.getElementById('edit_total'); if(tEl) tEl.textContent=money(sub+iva);
+  sub=+sub.toFixed(2);
+  const discount=Number(document.getElementById('edit_discount')?.value??oEdit?.descuento??0);
+  const amount=+(sub*Math.min(100,Math.max(0,discount||0))/100).toFixed(2);
+  const base=+(sub-amount).toFixed(2),iva=+(base*(tasa/100)).toFixed(2);
+  const dEl=document.getElementById('edit_discount_amount');if(dEl)dEl.textContent=money(amount);
+  const tEl=document.getElementById('edit_total'); if(tEl) tEl.textContent=money(base+iva);
   const sEl=document.getElementById('edit_subtotal'); if(sEl) sEl.textContent=money(sub);
 }
 function openEditarProductos(id){
@@ -2913,7 +2917,9 @@ function openEditarProductos(id){
       ${avanzado?`<div class="section-note" style="background:var(--warn-bg);border-color:#e8d9a8;color:var(--warn-tx)"><span class="ni">⚠</span><div>Este pedido ya está "${STATES[o.state]?.label}". Esto corrige el registro del pedido (totales, historial, reportes) — <b>no cambia el inventario ya despachado ni la factura ya emitida</b>. Si lo que necesitas corregir es la cantidad de una entrega específica (para que también se ajuste el inventario), usa "Corregir esta entrega" desde ahí abajo en vez de esto.</div></div>`:''}
       <div id="editlines">${editLines.map((l,i)=>editLineHTML(l,i,minQtyEditLine(l.name))).join('')}</div>
       <button class="btn btn-ghost" onclick="addEditLine()" style="margin:10px 0 18px">✚ Agregar producto</button>
-      <div style="display:flex;justify-content:flex-end;gap:24px;font-size:14px;border-top:1px solid var(--line);padding-top:12px">
+      <div class="formgrid"><div class="field"><label>Descuento del pedido (%)</label><input id="edit_discount" type="number" min="0" max="100" step="0.01" value="${Number(o.descuento||0)}" oninput="updateEditTotals()"></div><div class="field"><label>Motivo del descuento</label><input id="edit_discount_reason" maxlength="2000" value="${financeEscape(o.descuentoMotivo||'')}" placeholder="Ej. Acuerdo comercial con el cliente"></div></div>
+      <div style="display:flex;justify-content:flex-end;gap:24px;flex-wrap:wrap;font-size:14px;border-top:1px solid var(--line);padding-top:12px">
+        <div>Descuento: <b id="edit_discount_amount"></b></div>
         <div>Subtotal: <b id="edit_subtotal">${money(o.subtotal||0)}</b></div>
         <div>Total (con IVA ${o.ivaTasa!=null?o.ivaTasa:15}%): <b id="edit_total">${money(o.total||0)}</b></div>
       </div>
@@ -2922,6 +2928,7 @@ function openEditarProductos(id){
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-gold" onclick="confirmEditarProductos()">Guardar cambios</button>
     </div>`;
+  updateEditTotals();
   document.getElementById('overlay').classList.add('open');
 }
 async function confirmEditarProductos(){
@@ -2946,15 +2953,26 @@ async function confirmEditarProductos(){
       const faltantes=nombresAntes.filter(n=>minQtyEditLine(n)>0&&!nombresNuevos.includes(n));
       if(faltantes.length){toast('No puedes quitar "'+faltantes[0]+'" — ya tiene facturación previa');return;}
     }
+    const discount=Number(document.getElementById('edit_discount').value);
+    const reason=document.getElementById('edit_discount_reason').value.trim();
+    if(!Number.isFinite(discount)||discount<0||discount>100){toast('El descuento debe estar entre 0 y 100%.');return;}
+    if(discount>0&&!reason){toast('Escribe el motivo del descuento.');return;}
+    const original=o;
+    const draft=JSON.parse(JSON.stringify(o));
     const antes=(o.products||[]).map(p=>p.qty+' '+p.name).join(', ');
-    o.products=editLines.map(l=>({name:l.name,qty:+parseFloat(l.qty).toFixed(2),price:+parseFloat(l.price).toFixed(2),desc:l.desc||''}));
-    computeTotals(o);
-    if(o.pago) recalcPago(o);
-    const despues=o.products.map(p=>p.qty+' '+p.name).join(', ');
-    o.history.push({s:o.state,actor:myName()+' · Gerente de Proyectos',t:ahoraStr(),note:'Productos del pedido editados por '+myName()+': antes ('+antes+'), ahora ('+despues+').'});
-    syncPedido(o);
+    draft.products=editLines.map(l=>({name:l.name,qty:+parseFloat(l.qty).toFixed(2),price:+parseFloat(l.price).toFixed(2),desc:l.desc||''}));
+    draft.descuento=discount;draft.descuentoMotivo=discount>0?reason:'';
+    computeTotals(draft);
+    if(draft.pago) recalcPago(draft);
+    const despues=draft.products.map(p=>p.qty+' '+p.name).join(', ');
+    draft.history.push({s:o.state,actor:myName()+' · Gerente de Proyectos',t:ahoraStr(),note:'Productos del pedido editados por '+myName()+': antes ('+antes+'), ahora ('+despues+'). Descuento: '+discount+'%'+(reason?' · Motivo: '+reason:'')+'.'});
+    try{
+      const saved=await apiPut('/api/pedidos/'+o.id,{products:draft.products,subtotal:draft.subtotal,descuento:draft.descuento,descuento_motivo:draft.descuentoMotivo,history:draft.history});
+      if(!saved||!saved.numero_pedido)throw Error('El servidor no confirmó el pedido.');
+      Object.assign(original,mapPedido(saved));
+    }catch(e){toast('No se pudo guardar: '+e.message);return;}
     closeModal();renderView();buildNav();
-    toast('Productos del pedido actualizados');
+    toast('Pedido y descuento guardados');
   }finally{ releaseGuard('confirmEditarProductos'); }
 }
 function openFacturar(id){
@@ -5792,6 +5810,8 @@ function reconciliationForm(invoice){
   if(!data){document.getElementById('financeProductLines').textContent='Actualiza el servidor para utilizar la conciliación.';return;}
   financeEditor.reconciliationLines=(data.invoices.find(i=>i.numero===invoice.numero)?.lines||[]).map(l=>({...l}));
   financeEditor.reconciliationTaxRatio=invoice.base?invoice.iva/invoice.base:0;
+  const gross=financeEditor.reconciliationLines.reduce((a,l)=>a+Number(l.qty)*Number(l.price),0);
+  financeEditor.reconciliationDiscount=gross>0&&invoice.base<=gross?+(100*(1-invoice.base/gross)).toFixed(6):0;
   document.getElementById('f_number').value=invoice.numero;
   document.getElementById('financeHelp').textContent='Copia los productos y cantidades que constan en esta factura. Solo se reemplaza su parte del pedido; lo pendiente y las demás facturas se conservan. Revisa base e IVA contra el documento, antes de notas de crédito. Si ya hubo una salida física, revisa cualquier diferencia con Bodega por separado.';
   reconciliationLinesHTML();financePreview();
@@ -5802,17 +5822,23 @@ function reconciliationLinesHTML(){
   const invoice=document.getElementById('f_invoice').value;
   const deliveries=editor.data.correction.deliveries.filter(d=>d.invoice===invoice);
   const options=deliveries.length?deliveries:[{index:-1,state:'Pedido completo'}];
-  document.getElementById('financeProductLines').innerHTML=`<div style="overflow:auto"><table class="ptable"><tr><th>Entrega</th><th>Producto</th><th>Unidades</th><th>Precio unitario</th><th></th></tr>${lines.map((l,i)=>`<tr><td><select aria-label="Entrega de la línea ${i+1}" onchange="reconciliationChange(${i},'deliveryIndex',Number(this.value))">${options.map(d=>`<option value="${d.index}" ${d.index===l.deliveryIndex?'selected':''}>${d.index<0?'Pedido':'Entrega '+(d.index+1)} · ${e(d.state)}</option>`).join('')}</select></td><td><input aria-label="Producto de la línea ${i+1}" list="reconciliationCatalog" value="${e(l.name)}" onchange="reconciliationChange(${i},'name',this.value)" style="min-width:200px"></td><td><input aria-label="Unidades de la línea ${i+1}" type="number" min="0.01" step="0.01" value="${e(l.qty)}" oninput="reconciliationChange(${i},'qty',this.value)" style="width:90px"></td><td><input aria-label="Precio de la línea ${i+1}" type="number" min="0" step="0.01" value="${e(l.price)}" oninput="reconciliationChange(${i},'price',this.value)" style="width:90px"></td><td><button class="btn" onclick="reconciliationRemove(${i})" aria-label="Quitar línea ${i+1}">×</button></td></tr>`).join('')}</table></div><datalist id="reconciliationCatalog">${CATALOGO.map(n=>`<option value="${e(n)}"></option>`).join('')}</datalist><button class="btn" onclick="reconciliationAdd()">Agregar producto</button><p class="hint">Al cambiar cantidades o precios se propone una base con el descuento general del pedido. Puedes corregir base e IVA para copiar exactamente la factura contable. Para corregir una conciliación previa, registra otra; ambas quedan en el historial.</p>`;
+  document.getElementById('financeProductLines').innerHTML=`<div style="overflow:auto"><table class="ptable"><tr><th>Entrega</th><th>Producto</th><th>Unidades</th><th>Precio unitario</th><th></th></tr>${lines.map((l,i)=>`<tr><td><select aria-label="Entrega de la línea ${i+1}" onchange="reconciliationChange(${i},'deliveryIndex',Number(this.value))">${options.map(d=>`<option value="${d.index}" ${d.index===l.deliveryIndex?'selected':''}>${d.index<0?'Pedido':'Entrega '+(d.index+1)} · ${e(d.state)}</option>`).join('')}</select></td><td><input aria-label="Producto de la línea ${i+1}" list="reconciliationCatalog" value="${e(l.name)}" onchange="reconciliationChange(${i},'name',this.value)" style="min-width:200px"></td><td><input aria-label="Unidades de la línea ${i+1}" type="number" min="0.01" step="0.01" value="${e(l.qty)}" oninput="reconciliationChange(${i},'qty',this.value)" style="width:90px"></td><td><input aria-label="Precio de la línea ${i+1}" type="number" min="0" step="0.01" value="${e(l.price)}" oninput="reconciliationChange(${i},'price',this.value)" style="width:90px"></td><td><button class="btn" onclick="reconciliationRemove(${i})" aria-label="Quitar línea ${i+1}">×</button></td></tr>`).join('')}</table></div><div class="field"><label>Descuento de esta factura (%)</label><input id="reconciliationDiscount" type="number" min="0" max="100" step="any" value="${Number(editor.reconciliationDiscount||0)}" oninput="reconciliationDiscountChange(this.value)"></div><datalist id="reconciliationCatalog">${CATALOGO.map(n=>`<option value="${e(n)}"></option>`).join('')}</datalist><button class="btn" onclick="reconciliationAdd()">Agregar producto</button><p class="hint">El descuento se aplica a los productos de esta factura. Escribe su motivo en Motivo obligatorio. Puedes corregir base e IVA para copiar exactamente la factura contable. Para corregir una conciliación previa, registra otra; ambas quedan en el historial.</p>`;
 }
 function reconciliationChange(index,key,value){
   if(financeSaving||financeEditor?.pending)return;
   financeEditor.reconciliationLines[index][key]=value;
   if(key==='qty'||key==='price')reconciliationTotals();
 }
+function reconciliationDiscountChange(value){
+ if(financeSaving||financeEditor?.pending)return;
+ const discount=Number(value);
+ if(!Number.isFinite(discount)||discount<0||discount>100){document.getElementById('financePreview').textContent='El descuento debe estar entre 0 y 100%.';return;}
+ financeEditor.reconciliationDiscount=discount;reconciliationTotals();
+}
 function reconciliationTotals(){
   const editor=financeEditor;
   const gross=editor.reconciliationLines.reduce((sum,l)=>sum+(Number(l.qty)||0)*(Number(l.price)||0),0);
-  const base=Math.round(gross*(1-Number(editor.data.correction.discount||0)/100)*100)/100;
+  const base=Math.round(gross*(1-Number(editor.reconciliationDiscount||0)/100)*100)/100;
   document.getElementById('f_base').value=base.toFixed(2);
   document.getElementById('f_iva').value=(Math.round(base*editor.reconciliationTaxRatio*100)/100).toFixed(2);financePreview();
 }
@@ -5828,6 +5854,8 @@ function reconciliationRemove(index){
 }
 
 function financeBody(){
+  const discountField=document.getElementById('reconciliationDiscount');
+  if(discountField&&(!Number.isFinite(Number(discountField.value))||Number(discountField.value)<0||Number(discountField.value)>100))throw Error('El descuento debe estar entre 0 y 100%.');
   const read=id=>document.getElementById(id)?.value;
   return {type:financeEditor.target?'REVERSO':read('f_type'),target:financeEditor.target,invoice:read('f_invoice'),number:read('f_number'),date:read('f_date'),base:read('f_base'),iva:read('f_iva'),reason:read('f_reason'),attachment:financeEditor.attachment,lines:financeEditor.reconciliationLines||financeEditor.productLines?.map((r,index)=>({name:r.name,mode:read('fp_mode_'+index),value:read('fp_value_'+index)}))};
 }

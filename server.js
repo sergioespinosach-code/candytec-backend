@@ -589,6 +589,14 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
     const row = current.rows[0];
     const b = req.body;
     orderFinance.protect(row,b);
+    if(b.descuento!==undefined){
+      const discount=Number(b.descuento),reason=String(b.descuento_motivo??row.descuento_motivo??'').trim();
+      if(!Number.isFinite(discount)||discount<0||discount>100)return res.status(400).json({error:'El descuento debe estar entre 0 y 100%.'});
+      if(discount>0&&discount!==Number(row.descuento||0)&&!reason)return res.status(400).json({error:'Escribe el motivo del descuento.'});
+      if(reason.length>2000)return res.status(400).json({error:'El motivo admite hasta 2000 caracteres.'});
+      b.descuento=discount;b.descuento_motivo=discount>0?reason:'';
+    }
+
     const products = b.products !== undefined ? b.products : row.products;
     const summary = orderSummary.summarize(products,{producto:row.producto,cantidad:row.cantidad});
 
