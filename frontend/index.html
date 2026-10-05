@@ -1483,6 +1483,27 @@ function viewProductoListo(){
     : emptyState('Nada por recibir','Cuando el Jefe registre producción, aparecerá aquí para recibirla.'));
 }
 
+function openHistoricalDispatch(id){
+  if(!isGerente())return;
+  const o=ORDERS.find(x=>x.id===id);if(!o)return;
+  document.getElementById('modal').innerHTML=`<div class="modal-head"><div><div class="mh-id">Registrar despacho ya realizado</div><div class="mh-client">${financeEscape(o.id)} · ${financeEscape(o.client)}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div>
+  <div class="modal-body"><p>Usa esta corrección únicamente si la mercancía de esta factura ya salió físicamente. Se registrará en tránsito sin descontar existencias de ningún producto de esa factura. El registro quedará en el historial.</p><div class="field"><label>Fecha real del despacho</label><input id="historicalDate" type="date"></div><div class="field"><label>Motivo de la regularización</label><textarea id="historicalReason" maxlength="2000" placeholder="Explica cuándo se despachó y por qué se registra ahora"></textarea></div><label><input id="historicalConfirm" type="checkbox"> Confirmo que todos los productos de esta factura ya fueron despachados.</label></div>
+  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn btn-gold" onclick="saveHistoricalDispatch('${id}')">Registrar en tránsito</button></div>`;
+  document.getElementById('overlay').classList.add('open');
+}
+async function saveHistoricalDispatch(id){
+ if(guardDouble('historicalDispatch'))return;
+ try{
+  if(!isGerente())return;
+  const fecha=document.getElementById('historicalDate').value,motivo=document.getElementById('historicalReason').value.trim();
+  if(!fecha||motivo.length<10||!document.getElementById('historicalConfirm').checked){toast('Completa la fecha, el motivo y la confirmación del despacho.');return;}
+  const saved=await apiPost('/api/pedidos/'+encodeURIComponent(id)+'/despacho-historico',{fecha,motivo});
+  if(!saved?.numero_pedido)throw Error('El servidor no confirmó el registro.');
+  const o=ORDERS.find(x=>x.id===id);if(o)Object.assign(o,mapPedido(saved));
+  afterAction('Despacho anterior registrado · sin movimiento de inventario');
+ }catch(e){toast('No se pudo confirmar: '+e.message);}finally{releaseGuard('historicalDispatch');}
+}
+
 async function despachar(id){
   if(guardDouble('despachar')) return;
   try{
@@ -2766,6 +2787,8 @@ function openOrder(id){
 function modalActions(o){
   let acts=[];
   const r=currentRole, s=o.state;
+  if(isGerente()&&s==='POR_ENTREGAR'&&['CT-2026-01206','CT-2026-01187','CT-2026-01185','CT-2026-01184'].includes(o.id))
+    acts.push(`<button class="btn btn-gold" onclick="openHistoricalDispatch('${o.id}')">Registrar despacho ya realizado</button>`);
   if(r==='facturacion'&&s==='POR_FACTURAR'){
     if(!tieneEntregas(o)) acts.push(`<button class="btn btn-danger" onclick="returnOrder('${o.id}')">Devolver al vendedor</button>`);
     acts.push(`<button class="btn btn-gold" onclick="openFacturar('${o.id}')">${tieneEntregas(o)?'Facturar siguiente entrega':'Facturar'}</button>`);

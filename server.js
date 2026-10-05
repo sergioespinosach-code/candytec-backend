@@ -830,6 +830,7 @@ dispatchPlanner.register(app, pool, verifyToken);
 inventoryMovement.register(app, pool, verifyToken);
 inventoryWarehouse.register(app,pool,verifyToken);
 orderFinance.register(app, pool, verifyToken);
+require('./lib/historical-dispatch').register(app, pool, verifyToken);
 businessControl.register(app, pool, verifyToken);
 productMaster.register(app, pool, verifyToken);
 baseFormulations.register(app, pool, verifyToken);
