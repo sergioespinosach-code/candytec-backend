@@ -445,6 +445,21 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
 /* Costos y gastos */
 .bc{max-width:1280px}.bc fieldset{border:0;padding:0;min-width:0}.bc h2,.bc h3{margin:18px 0 12px}.bc-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0}.bc label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600}.bc input,.bc select,.bc textarea{font:inherit;padding:10px;border:1px solid var(--line,#ddd);border-radius:8px;background:white;color:#29251f;min-width:0;max-width:100%;width:100%}.bc textarea{min-height:76px}.bc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:18px 0}.bc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:18px 0}.bc-kpi,.bc-panel{border:1px solid #e5e0d6;background:#fff;border-radius:12px;padding:16px}.bc-kpi span{display:block;font-size:12px;color:#716b60}.bc-kpi strong{display:block;font-size:24px;margin-top:8px}.bc-scroll{overflow:auto;border:1px solid #e5e0d6;border-radius:10px}.bc table{border-collapse:collapse;width:100%;font-size:13px}.bc td,.bc th{padding:12px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}.bc th{background:#f4f1ea;white-space:nowrap}.bc td small{display:block;color:#797368;margin-top:4px}.bc-note{color:#716b60;font-size:13px;line-height:1.6;margin:12px 0}.bc-error{color:#a32d20;font-size:14px;margin:10px 0}.bc-rankings{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.bc-rank{display:grid;grid-template-columns:1fr auto;gap:6px;margin:12px 0;font-size:13px}.bc progress{grid-column:1/-1;width:100%;height:7px;accent-color:#cf5032}.bc-line{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:14px;margin-bottom:10px;border:1px solid #e5e0d6;border-radius:10px;background:#fff;align-items:end}.bc-line label:nth-child(3){min-width:150px}.bc details{margin:10px 0}.bc summary{cursor:pointer;font-size:14px}.bc fieldset:disabled{opacity:.7}.bc a{color:#aa3e27}.bc #bcSearch{width:280px}.bc #bcCategory{width:220px}@media(max-width:600px){.bc-kpi strong{font-size:20px}.bc-line{grid-template-columns:1fr 1fr}.bc-line label:nth-child(3){grid-column:1/-1}.bc .bc-toolbar input{max-width:100%}}
 
+
+/* Resumen de ventas en Pedidos */
+.seller-sales{margin:0 0 20px}
+.seller-sales-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.seller-sales-head h2{font-size:17px;margin:0}
+.seller-sales-head p{font-size:12px;color:var(--muted);margin:0}
+.seller-sales-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px}
+.seller-sales-card{min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--card,#fff);padding:13px 15px;text-align:left;color:var(--text,#28251e);font:inherit;cursor:pointer}
+.seller-sales-card:hover{border-color:var(--gold,#ce5034)}
+.seller-sales-card[aria-pressed="true"]{border-color:var(--gold,#ce5034);box-shadow:inset 0 0 0 1px var(--gold,#ce5034);background:var(--gold-pale,#fff3ee)}
+.seller-sales-card:focus-visible{outline:2px solid var(--gold,#ce5034);outline-offset:3px}
+.seller-sales-card span{display:block;font-size:12px;overflow-wrap:anywhere;margin-bottom:5px}
+.seller-sales-card strong{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.seller-sales-note{font-size:11px;color:var(--muted);margin:9px 0 0}
+@media(max-width:480px){.seller-sales-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.seller-sales-card{padding:11px}.seller-sales-card strong{font-size:18px}}
 </style>
 <script>
 /* BEGIN ORDER FINANCE CORE */
@@ -1073,7 +1088,31 @@ function vendedorFilterBar(){
   const vends=[...new Set(ORDERS.map(o=>o.vendedor))].sort();
   return `<div class="filters" style="margin-bottom:14px"><button class="fchip ${vendFilter==='todos'?'on':''}" onclick="setVendFilter('todos')">Todos los vendedores</button>${vends.map(n=>`<button class="fchip ${vendFilter===n?'on':''}" onclick="setVendFilter('${n}')">${n}</button>`).join('')}</div>`;
 }
-function porVend(list){return vendFilter==='todos'?list:list.filter(o=>o.vendedor===vendFilter);}
+// Ventas netas de los pedidos del año, independientemente de los filtros de la lista.
+function orderSellerSales(orders,year){
+  const totals=new Map();
+  let undated=0;
+  for(const o of orders){
+    const name=String(o.vendedor||'').trim()||'Sin vendedor';
+    if(!totals.has(name))totals.set(name,0);
+    const date=parseFecha(o.fechaOrden);
+    if(date!==null&&new Date(date).getFullYear()!==year)continue;
+    const summary=CandyFinance.summary(o);
+    if(!summary.invoices.length)continue;
+    if(date===null)undated++;
+    totals.set(name,totals.get(name)+Math.round(summary.base*100));
+  }
+  const rows=[...totals].map(([name,cents])=>({name,amount:cents/100})).sort((a,b)=>b.amount-a.amount||a.name.localeCompare(b.name,'es'));
+  return {rows,total:[...totals.values()].reduce((a,b)=>a+b,0)/100,undated};
+}
+function orderSellerSalesHTML(){
+  if(!verTodo())return '';
+  const year=Number(new Intl.DateTimeFormat('en',{year:'numeric',timeZone:'America/Guayaquil'}).format(new Date()));
+  const data=orderSellerSales(ORDERS,year),esc=financeEscape;
+  const card=(name,amount,value,selected)=>`<button type="button" class="seller-sales-card" data-vendor="${esc(value)}" aria-pressed="${selected}" onclick="setVendFilter(this.dataset.vendor)"><span>${esc(name)}</span><strong>${money(amount)}</strong></button>`;
+  return `<section class="seller-sales" aria-label="Ventas por vendedor"><div class="seller-sales-head"><h2>Ventas por vendedor · ${year}</h2><p>Facturado neto sin IVA · descuentos y notas de crédito incluidos</p></div><div class="seller-sales-grid">${card('Todos los vendedores',data.total,'todos',vendFilter==='todos')}${data.rows.map(r=>card(r.name,r.amount,r.name,vendFilter===r.name)).join('')}</div><p class="seller-sales-note">Acumulado por año del pedido, incluidos los entregados y pagados. Pulsa un vendedor para ver sus pedidos; buscar o filtrar por estado no cambia estos importes.${data.undated?' Incluye '+data.undated+' pedido(s) facturado(s) sin fecha, igual que el reporte anual.':''}</p></section>`;
+}
+function porVend(list){return vendFilter==='todos'?list:list.filter(o=>(String(o.vendedor||'').trim()||'Sin vendedor')===vendFilter);}
 
 function renderView(){
   if(currentView==='formulaciones'&&document.getElementById('bfEditorForm'))return;
@@ -1150,7 +1189,7 @@ function renderView(){
 
   else if(v==='todos-g'){
     html=listView({title:'Pedidos',sub:'Todos los pedidos de todos los vendedores',
-      baseFn:()=>porVend(stateBase()),cardFn:o=>orderCard(o),chips:true,note:vendedorFilterBar()});
+      baseFn:()=>porVend(stateBase()),cardFn:o=>orderCard(o),chips:true,note:orderSellerSalesHTML()});
   }
 
   else if(v==='mis-movimientos'){ html=viewFacturacionLog(); }
