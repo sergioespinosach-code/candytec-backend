@@ -1217,7 +1217,7 @@ function renderView(){
   }
 
   main.innerHTML=html;
-  if(v==='nuevo') updateTotals();
+  if(v==='nuevo'){updateTotals();if(canChooseOrderSeller())loadOrderSellers('f_order_seller');}
 }
 function emptyState(title,sub){
   return `<div class="empty"><div class="ei">◔</div><h3>${title}</h3><p>${sub}</p></div>`;
@@ -2497,6 +2497,51 @@ function updateTotals(){
   const mw=document.getElementById('motivoWrap'); if(mw) mw.style.display=d>0?'':'none';
 }
 
+let sellerWriteVersion=0;
+let sellerEdit={busy:false};
+function canChooseOrderSeller(){return isGerente()||isJefeVentas();}
+function canChangeOrderSeller(){return currentRole==='gerente_proy'&&isGerente();}
+function orderSellerField(id){
+  return `<div class="field full"><label for="${id}">Vendedor al que pertenece el pedido</label><select id="${id}" disabled><option value="">Cargando vendedores…</option></select><div class="hint" id="${id}_status" role="status"></div><button type="button" class="btn btn-sm" id="${id}_retry" hidden onclick="loadOrderSellers('${id}')">Reintentar</button></div>`;
+}
+async function loadOrderSellers(id){
+  const select=document.getElementById(id),status=document.getElementById(id+'_status'),retry=document.getElementById(id+'_retry'),role=currentRole;
+  if(!select||!canChooseOrderSeller())return;
+  select.disabled=true;retry.hidden=true;status.textContent='';
+  try{
+    const rows=await apiGet('/api/pedido-vendedores');
+    if(document.getElementById(id)!==select||currentRole!==role)return;
+    if(!Array.isArray(rows)||!rows.length)throw Error('No hay vendedores disponibles.');
+    select.innerHTML='<option value="">Selecciona a quién pertenece…</option>'+rows.map(u=>`<option value="${Number(u.id)}">${financeEscape(u.name)} · ${financeEscape(ROLE_KIND_META[u.role]?.label||u.role)}</option>`).join('');
+    select.disabled=false;
+    status.textContent='La venta se atribuye a la persona seleccionada. Quien registra el pedido queda en el historial.';
+  }catch(e){
+    if(document.getElementById(id)!==select||currentRole!==role)return;
+    select.innerHTML='<option value="">No se pudo cargar la lista</option>';status.textContent=e.message;retry.hidden=false;
+  }
+}
+function openOrderSeller(id){
+  if(!canChangeOrderSeller()||sellerEdit.busy)return;
+  const o=ORDERS.find(x=>x.id===id);if(!o)return;
+  sellerEdit={id,before:o.vendedor??null,busy:false};
+  document.getElementById('modal').innerHTML=`<div class="modal-head"><div><div class="mh-id">Cambiar vendedor</div><div class="mh-client">${financeEscape(o.id)} · ${financeEscape(o.client)}</div></div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body"><p>Vendedor actual: <b>${financeEscape(o.vendedor||'Sin vendedor')}</b></p>${orderSellerField('change_order_seller')}<p class="hint">El pedido y sus ventas pasarán al vendedor elegido. Se conservarán los productos, facturas, pagos, estado e inventario.</p><p id="orderSellerError" role="alert"></p></div><div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button id="orderSellerSave" class="btn btn-gold" onclick="saveOrderSeller()">Guardar vendedor</button></div>`;
+  document.getElementById('overlay').classList.add('open');
+  loadOrderSellers('change_order_seller');
+}
+async function saveOrderSeller(){
+  if(!canChangeOrderSeller()||sellerEdit.busy)return;
+  const select=document.getElementById('change_order_seller'),status=document.getElementById('orderSellerError'),button=document.getElementById('orderSellerSave');
+  if(!select||select.disabled||!select.value){status.textContent='Selecciona el vendedor.';return;}
+  const edit=sellerEdit;
+  edit.busy=true;sellerWriteVersion++;select.disabled=true;button.disabled=true;status.textContent='Guardando…';
+  try{
+    const row=await apiPost('/api/pedidos/'+encodeURIComponent(edit.id)+'/vendedor',{vendedor_id:Number(select.value),vendedor_anterior:edit.before});
+    const o=ORDERS.find(x=>x.id===edit.id);if(o)Object.assign(o,mapPedido(row));
+    sellerWriteVersion++;edit.busy=false;
+    closeModal();renderView();buildNav();openOrder(edit.id);toast('Vendedor actualizado.');
+  }catch(e){status.textContent=e.message;}
+  finally{edit.busy=false;select.disabled=false;button.disabled=false;}
+}
 function viewNuevo(){
   clienteSel=null;
   pagoAdjunto=null;
@@ -2504,6 +2549,8 @@ function viewNuevo(){
   return pageHead('Nuevo pedido','Selecciona productos del catálogo CandyTec y completa la información')
   + `<div class="formwrap">
     <div class="formgrid">
+
+      ${canChooseOrderSeller()?orderSellerField('f_order_seller'):''}
 
       <div class="field full" onclick="event.stopPropagation()">
         <label>Cliente</label>
@@ -2572,7 +2619,7 @@ function viewNuevo(){
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:22px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="setView('mis-pedidos')">Cancelar</button>
+      <button class="btn btn-ghost" onclick="setView(canChooseOrderSeller()?'todos-g':'mis-pedidos')">Cancelar</button>
       <button class="btn btn-primary" onclick="createOrder()">Crear pedido</button>
     </div>
   </div>`;
@@ -2582,6 +2629,8 @@ function attachOrdenCompra(el){handleFileDrop(el, up=>{ordenCompraAdjunto=up;});
 async function createOrder(){
   if(guardDouble('createOrder')) return;
   try{
+    const selectedSeller=canChooseOrderSeller()?document.getElementById('f_order_seller'):null;
+    if(canChooseOrderSeller()&&(!selectedSeller||selectedSeller.disabled||!selectedSeller.value)){toast('Selecciona a quién pertenece el pedido.');return;}
     if(!clienteSel){toast('Selecciona un cliente de tu cartera (o créalo primero)');return;}
     const client=clienteSel.nombre;
     const ruc=clienteSel.ruc;
@@ -2630,15 +2679,17 @@ async function createOrder(){
         forma_pago:o.formaPago, ciudad:o.ciudad, provincia:o.provincia, direccion_entrega:o.direccionEntrega, vendedor:o.vendedor,
         estado:o.state, products:o.products, descuento:o.descuento, descuento_motivo:o.descuentoMotivo, iva_tasa:o.ivaTasa,
         attach:o.attach, history:o.history, subtotal:o.subtotal,
+        ...(selectedSeller?{vendedor_id:Number(selectedSeller.value)}:{}),
       });
     }catch(err){ toast('No se pudo guardar en el servidor: '+err.message); return; }
-    o.id=row.numero_pedido; // el número real lo asigna el servidor, único de verdad
+    Object.assign(o,mapPedido(row)); // vendedor y creador confirmados por el servidor
+    sellerWriteVersion++;
     const id=o.id;
     ORDERS.unshift(o);
     prodLines=[{prod:'',qty:'',price:'',desc:''}];
     clienteSel=null; pagoAdjunto=null; ordenCompraAdjunto=null;
     toast('Pedido '+id+' creado · Total '+money(o.total));
-    setView('mis-pedidos');
+    setView(canChooseOrderSeller()?'todos-g':'mis-pedidos');
   }finally{ releaseGuard('createOrder'); }
 }
 
@@ -2646,6 +2697,7 @@ async function createOrder(){
    ORDER DETAIL MODAL + HISTORY
    ============================================================ */
 function openOrder(id){
+  if(sellerEdit.busy)return;
   if(financeSaving||financeEditor?.pending){toast('Confirma primero el ajuste pendiente.');return;}
   const o=ORDERS.find(x=>x.id===id); if(!o) return;
   const visAttach=o.attach;
@@ -2782,7 +2834,7 @@ function openOrder(id){
         <div class="dg"><div class="k">RUC / CI</div><div class="v">${o.ruc||'—'}</div></div>
         ${veDcto?`<div class="dg"><div class="k">Forma de pago</div><div class="v">${o.formaPago||'—'}</div></div>
         <div class="dg"><div class="k">Fecha de cobro</div><div class="v">${o.fechaCobro||'—'}</div></div>`:''}
-        <div class="dg"><div class="k">Vendedor</div><div class="v">${o.vendedor}</div></div>
+        <div class="dg"><div class="k">Vendedor</div><div class="v">${financeEscape(o.vendedor||'Sin vendedor')}</div></div>
       </div>
 
       ${o.desc&&o.desc!=='—'?`<div style="margin-bottom:20px;font-size:13.5px;color:var(--ink-2);background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px"><b style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);display:block;margin-bottom:5px">Descripción</b>${o.desc}</div>`:''}
@@ -2826,6 +2878,7 @@ function openOrder(id){
 function modalActions(o){
   let acts=[];
   const r=currentRole, s=o.state;
+  if(canChangeOrderSeller())acts.push(`<button class="btn btn-ghost" data-order="${financeEscape(o.id)}" onclick="openOrderSeller(this.dataset.order)">Cambiar vendedor</button>`);
   if(isGerente()&&s==='POR_ENTREGAR'&&['CT-2026-01206','CT-2026-01187','CT-2026-01185','CT-2026-01184'].includes(o.id))
     acts.push(`<button class="btn btn-gold" onclick="openHistoricalDispatch('${o.id}')">Registrar despacho ya realizado</button>`);
   if(r==='facturacion'&&s==='POR_FACTURAR'){
@@ -2853,7 +2906,7 @@ function modalActions(o){
   if(!acts.length) return '';
   return `<div class="modal-actions">${acts.join('')}</div>`;
 }
-function closeModal(){if(movementEditState.busy||movementEditState.pending){movementEditStatus('Confirma la corrección con Reintentar antes de cerrar.');return;}if(financeSaving||financeEditor?.pending){toast('Espera la confirmación del ajuste o pulsa Reintentar.');return;}financeEditor=null;if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
+function closeModal(){if(sellerEdit.busy){toast('Espera a que se guarde el vendedor.');return;}if(movementEditState.busy||movementEditState.pending){movementEditStatus('Confirma la corrección con Reintentar antes de cerrar.');return;}if(financeSaving||financeEditor?.pending){toast('Espera la confirmación del ajuste o pulsa Reintentar.');return;}financeEditor=null;if(inventorySave.busy||inventorySave.pending){movementStatus('Confirma el movimiento con Reintentar antes de cerrar.',true);return;}document.getElementById('overlay').classList.remove('open');}
 document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
 function eliminarPedido(id){
   if(currentRole!=='gerente_proy'){toast('Solo tú puedes eliminar pedidos');return;}
@@ -5314,6 +5367,7 @@ function syncPedido(o, extra){
 
 /* trae todo del servidor y llena los arrays que usa la pantalla */
 async function loadAllData(){
+  const sellerVersionAtStart=sellerWriteVersion;
   const financialEditorAtStart=typeof financeEditor==='undefined'?null:financeEditor;
   const financialVersionAtStart=typeof financialWriteVersion==='undefined'?0:financialWriteVersion;
   const inventoryVersionAtStart=inventoryWriteVersion;
@@ -5322,7 +5376,7 @@ async function loadAllData(){
     apiGet('/api/movimientos'), apiGet('/api/solicitudes'), apiGet('/api/inventario'), apiGet('/api/catalogo'),
   ]);
   CLIENTES.length=0; clientesR.forEach(r=>CLIENTES.push(mapCliente(r)));
-  if(financialVersionAtStart===(typeof financialWriteVersion==='undefined'?0:financialWriteVersion)&&(typeof financeSaving==='undefined'||!financeSaving)&&(typeof financeEditor==='undefined'||(!financeEditor&&financialEditorAtStart===financeEditor)))ORDERS = pedidosR.map(mapPedido);
+  if(sellerVersionAtStart===sellerWriteVersion&&!sellerEdit.busy&&financialVersionAtStart===(typeof financialWriteVersion==='undefined'?0:financialWriteVersion)&&(typeof financeSaving==='undefined'||!financeSaving)&&(typeof financeEditor==='undefined'||(!financeEditor&&financialEditorAtStart===financeEditor)))ORDERS = pedidosR.map(mapPedido);
   PRODUCCIONES.length=0; produccionesR.forEach(r=>PRODUCCIONES.push(mapProduccion(r)));
   if(inventoryVersionAtStart===inventoryWriteVersion&&!inventorySave.busy&&!movementEditState.busy&&!warehouseMove.busy){MOVIMIENTOS.length=0; movimientosR.forEach(r=>MOVIMIENTOS.push(mapMovimiento(r)));}
   SOLICITUDES.length=0; solicitudesR.forEach(r=>SOLICITUDES.push(mapSolicitud(r)));
@@ -5430,7 +5484,7 @@ async function tryAutoLogin(){
     arr(orders).forEach(o=>{
       const products=quantities(o.products), deliveries=arr(o.entregas);
       const c=arr(clients).find(c=>o.ruc&&c.ruc===o.ruc)||{};
-      const common={orderId:o.numero_pedido,client:o.cliente||'',ruc:o.ruc||'',city:o.ciudad||'',sector:c.sector||'',address:o.direccion_entrega||'',vendor:o.vendedor||'',dueDate:o.fecha_entrega instanceof Date?[o.fecha_entrega.getFullYear(),String(o.fecha_entrega.getMonth()+1).padStart(2,'0'),String(o.fecha_entrega.getDate()).padStart(2,'0')].join('-'):(o.fecha_entrega?String(o.fecha_entrega).slice(0,10):''),blocked:arr(o.history).slice(-1)[0]?.devuelto?'Devuelto para corrección':''};
+      const common={orderId:o.numero_pedido,client:o.cliente||'',ruc:o.ruc||'',city:o.ciudad||'',sector:c.sector||'',address:o.direccion_entrega||'',vendor:o.vendedor||'',dueDate:o.fecha_entrega instanceof Date?[o.fecha_entrega.getFullYear(),String(o.fecha_entrega.getMonth()+1).padStart(2,'0'),String(o.fecha_entrega.getDate()).padStart(2,'0')].join('-'):(o.fecha_entrega?String(o.fecha_entrega).slice(0,10):''),blocked:arr(o.history).filter(h=>h.kind!=='SELLER_ASSIGNMENT').slice(-1)[0]?.devuelto?'Devuelto para corrección':''};
       function add(key,kind,status,items,invoice,index){
         items=items.filter(x=>x.qty>0).sort((a,b)=>a.name.localeCompare(b.name,'es'));
         if(!items.length)return;

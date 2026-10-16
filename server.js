@@ -8,6 +8,7 @@ const inventoryEdit = require('./lib/inventory-edit');
 const inventoryWarehouse = require('./lib/inventory-warehouse');
 const orderFinance = require('./lib/order-finance');
 const orderSummary = require('./lib/order-summary');
+const orderSeller = require('./lib/order-seller');
 const businessControl = require('./lib/business-control');
 const productMaster = require('./lib/product-master');
 const baseFormulations = require('./lib/base-formulations');
@@ -566,19 +567,20 @@ app.get('/api/pedidos', verifyToken, async (req, res) => {
 app.post('/api/pedidos', verifyToken, async (req, res) => {
   try {
     const { cliente, ruc, producto, descripcion, cantidad, fecha_orden, fecha_entrega, fecha_cobro, forma_pago, ciudad, provincia, direccion_entrega, vendedor, estado, products, descuento, descuento_motivo, attach, history, subtotal, iva_tasa } = req.body;
+    const assignment = await orderSeller.creation(pool,req.user.userId,req.body);
     // el número de pedido lo genera el servidor con una secuencia real — nunca se repite, ni si se borran pedidos
     const seq = await pool.query("SELECT nextval('pedido_numero_seq') as n");
     const numero_pedido = 'CT-2026-0' + seq.rows[0].n;
-    const hist = history && history.length ? history : [{ s: estado, actor: `${vendedor} · Vendedor`, t: new Date().toISOString(), note: 'Pedido creado.' }];
+    const hist = [{s:estado,actor:assignment.user.name+' · '+assignment.user.role,t:new Date().toISOString(),createdBy:{id:assignment.user.id,name:assignment.user.name},note:(typeof history?.[0]?.note==='string'?history[0].note:'Pedido creado.')+' Vendedor asignado: '+assignment.seller.name+'.'}];
     const result = await pool.query(
       `INSERT INTO pedidos (numero_pedido, cliente, ruc, producto, descripcion, cantidad, fecha_orden, fecha_entrega, fecha_cobro, forma_pago, ciudad, provincia, direccion_entrega, vendedor, estado, products, history, descuento, descuento_motivo, attach, subtotal, iva_tasa)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
-      [numero_pedido, cliente, ruc, producto, descripcion, cantidad, fecha_orden || null, fecha_entrega || null, fecha_cobro || null, forma_pago, ciudad, provincia, direccion_entrega || '', vendedor, estado,
+      [numero_pedido, cliente, ruc, producto, descripcion, cantidad, fecha_orden || null, fecha_entrega || null, fecha_cobro || null, forma_pago, ciudad, provincia, direccion_entrega || '', assignment.seller.name, estado,
        JSON.stringify(products || []), JSON.stringify(hist), descuento || 0, descuento_motivo || '', JSON.stringify(attach || []), subtotal || null, iva_tasa!=null?iva_tasa:15]
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status||500).json({ error: err.message });
   }
 });
 
@@ -588,6 +590,8 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
     if (!current.rows.length) return res.status(404).json({ error: 'Pedido no encontrado' });
     const row = current.rows[0];
     const b = req.body;
+    if(b.vendedor_id!==undefined||(b.vendedor!==undefined&&b.vendedor!==row.vendedor))return res.status(403).json({error:'Usa Cambiar vendedor desde la ficha del pedido.'});
+    if(b.history!==undefined&&(row.history||[]).filter(h=>h.kind==='SELLER_ASSIGNMENT').some(h=>!Array.isArray(b.history)||!b.history.some(next=>JSON.stringify(next)===JSON.stringify(h))))return res.status(409).json({error:'El pedido cambió de vendedor. Actualiza antes de guardar.'});
     orderFinance.protect(row,b);
     if(b.descuento!==undefined){
       const discount=Number(b.descuento),reason=String(b.descuento_motivo??row.descuento_motivo??'').trim();
@@ -625,12 +629,12 @@ app.put('/api/pedidos/:id', verifyToken, async (req, res) => {
     const result = await pool.query(
       `UPDATE pedidos SET factura=$1, estado=$2, fecha_cobro=$3, subtotal=$4, descuento=$5,
        descuento_motivo=$6, recibio_nombre=$7, pago=$8, history=$9, attach=$10, products=$11, fecha_entrega=$12, entregas=$13, direccion_entrega=$14, iva_tasa=$15, costo_transporte=$16, costo_estibaje=$17, producto=$18, cantidad=$19
-       WHERE numero_pedido=$20 AND financial_data=$21::jsonb RETURNING *`,
+       WHERE numero_pedido=$20 AND financial_data=$21::jsonb AND history IS NOT DISTINCT FROM $22::jsonb RETURNING *`,
       [merged.factura, merged.estado, merged.fecha_cobro, merged.subtotal, merged.descuento,
        merged.descuento_motivo, merged.recibio_nombre, merged.pago, merged.history, merged.attach,
-       merged.products, merged.fecha_entrega, merged.entregas, merged.direccion_entrega, merged.iva_tasa, merged.costo_transporte, merged.costo_estibaje, merged.producto, merged.cantidad, req.params.id, JSON.stringify(row.financial_data)]
+       merged.products, merged.fecha_entrega, merged.entregas, merged.direccion_entrega, merged.iva_tasa, merged.costo_transporte, merged.costo_estibaje, merged.producto, merged.cantidad, req.params.id, JSON.stringify(row.financial_data), JSON.stringify(row.history??null)]
     );
-    if(!result.rows.length)return res.status(409).json({error:'El pedido recibió un ajuste financiero. Actualiza antes de guardar.'});
+    if(!result.rows.length)return res.status(409).json({error:'El pedido recibió otro cambio. Actualiza antes de guardar.'});
     res.json(result.rows[0]);
   } catch (err) {
     res.status(err.status||500).json({ error: err.message });
@@ -830,6 +834,7 @@ dispatchPlanner.register(app, pool, verifyToken);
 inventoryMovement.register(app, pool, verifyToken);
 inventoryWarehouse.register(app,pool,verifyToken);
 orderFinance.register(app, pool, verifyToken);
+orderSeller.register(app, pool, verifyToken);
 require('./lib/historical-dispatch').register(app, pool, verifyToken);
 businessControl.register(app, pool, verifyToken);
 productMaster.register(app, pool, verifyToken);
