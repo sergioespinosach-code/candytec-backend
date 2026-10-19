@@ -84,3 +84,21 @@ test('lámina y rendimiento persisten con referencia de precio e historial; clie
  const old=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002'}));assert.equal(old.ficha.lamina.item_id,17);assert.equal(db.s.audit[1].after.ficha.lamina.nombre,'Lámina YumYum');
 });
 test('lámina inválida rechaza el guardado y no crea producto',async()=>{const db=dbFixture();await assert.rejects(master.save(db,1,body({data:{...data(),lamina:{item_id:999,unidades_por_kg:2000}}})),/no existe/);assert.equal(db.s.catalog.length,0);db.s.materials[0].unidad='L';await assert.rejects(master.save(db,1,body({data:{...data(),lamina:{item_id:17,unidades_por_kg:2000}}})),/convertir/);assert.equal(db.s.catalog.length,0);});
+
+test('componentes se guardan con auditoría e idempotencia sin cambiar stock ni promedios',async()=>{
+ const db=dbFixture(),model={version:2,basis:'weight',mass_extra_pct:5,items:[{source:'inventory',method:'yield',item_id:17,quantity:7700,unit:'kg',extra_pct:5},{source:'formula',method:'piece',formula_id:7,quantity:2,unit:'g',extra_pct:0}]};
+ const b=body({data:{...data(),cost_model:model}});const a=await master.save(db,1,b);await master.save(db,1,b);
+ assert.equal(a.ficha.cost_model.items.length,2);assert.equal(a.ficha.lamina,null);assert.equal(db.s.audit.length,1);
+ assert.equal(db.s.materials[0].costo_prom,6);assert.equal(db.s.movements.length,0);
+ await assert.rejects(master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002'})),{status:409});
+ const updated=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000003',data:{...data(),cost_model:{...model,mass_extra_pct:0}}}));
+ assert.equal(updated.ficha.cost_model.mass_extra_pct,0);assert.equal(db.s.audit[1].before.ficha.cost_model.mass_extra_pct,5);
+});
+test('guardar componente con material, fórmula o unidad inválidos revierte la ficha',async()=>{
+ const db=dbFixture();
+ for(const item of [
+  {source:'inventory',method:'yield',item_id:999,quantity:100,unit:'kg',extra_pct:0},
+  {source:'inventory',method:'presentation',item_id:17,quantity:1,unit:'u',extra_pct:0},
+  {source:'formula',method:'piece',formula_id:999,quantity:2,unit:'g',extra_pct:0}
+ ]){await assert.rejects(master.save(db,1,body({data:{...data(),cost_model:{version:2,basis:'pieces',mass_extra_pct:0,items:[item]}}})));assert.equal(db.s.catalog.length,0);assert.equal(db.s.audit.length,0);}
+});

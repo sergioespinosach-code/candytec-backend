@@ -14,6 +14,7 @@ function fixture(role='gerente'){
  if(sql.includes('FROM users'))return result([{id:1,name:'Gerencia',role:s.role}]);
  if(sql.startsWith('SELECT * FROM business_operations'))return result(s.ops.filter(x=>x.operation_key===p[0]));
  if(sql.includes('FROM inventario'))return result(inv);
+ if(sql.startsWith("SELECT id FROM base_formulations WHERE data->>"))return result(s.rows.filter(x=>x.data.source_key===p[0]&&x.id!==p[1]));
  if(sql.startsWith('SELECT * FROM base_formulations WHERE'))return result(s.rows.filter(x=>x.id===p[0]));
  if(sql.startsWith('INSERT INTO base_formulations')){const row={id:s.rows.length+1,version:1,data:JSON.parse(p[0]),snapshot:JSON.parse(p[1])};s.rows.push(row);return result([row]);}
  if(sql.startsWith('UPDATE base_formulations')){const row=s.rows.find(x=>x.id===p[2]);row.data=JSON.parse(p[0]);row.snapshot=JSON.parse(p[1]);row.version++;return result([row]);}
@@ -26,3 +27,14 @@ const body=()=>({data:recipe(),operation_key:'base-formulation-000001'});
 test('guarda fotografía y reintento idempotente no duplica base ni historial',async()=>{const db=fixture();const a=await bases.save(db,1,body()),b=await bases.save(db,1,body());assert.equal(a.id,b.id);assert.equal(a.snapshot.total,23);assert.equal(db.s.rows.length,1);assert.equal(db.s.audit.length,1);});
 test('editar exige versión y motivo y conserva receta previa',async()=>{const db=fixture();await bases.save(db,1,body());const b={...body(),id:1,version:1,reason:'Rendimiento corregido',operation_key:'base-formulation-000002',data:{...recipe(),yield_kg:8}};await bases.save(db,1,b);assert.equal(db.s.audit[1].before.data.yield_kg,9);assert.equal(db.s.rows[0].data.yield_kg,8);await assert.rejects(bases.save(db,1,{...b,operation_key:'base-formulation-000003'}),{status:409});});
 test('unidad incompatible, insumo inexistente, falta de permiso y fallo de auditoría no guardan',async()=>{const db=fixture();const bad=recipe();bad.lines[0].unit='L';await assert.rejects(bases.save(db,1,{...body(),data:bad}),/convertir/);assert.equal(db.s.rows.length,0);bad.lines[0].item_id=99;await assert.rejects(bases.save(db,1,{...body(),data:bad}),/ya no existe/);await assert.rejects(bases.save(fixture('facturacion'),1,body()),{status:403});db.s.fail=true;await assert.rejects(bases.save(db,1,body()),/fallo historial/);assert.equal(db.s.rows.length,0);assert.equal(db.s.ops.length,0);});
+
+test('plantilla es única por referencia y cliente antiguo no borra grupos o referencia',async()=>{
+ const db=fixture(),key=require('../lib/cost-templates').formulas[0].key;
+ const data={...recipe(),source_key:key};data.lines[0].mix_group='esencias';
+ const a=await bases.save(db,1,{...body(),data});
+ await assert.rejects(bases.save(db,1,{...body(),data,operation_key:'base-formulation-000002'}),/ya está cargada/);
+ assert.equal(db.s.rows.length,1);
+ await assert.rejects(bases.save(db,1,{...body(),id:a.id,version:1,reason:'Cambio',data:recipe(),operation_key:'base-formulation-000003'}),{status:409});
+ const b=await bases.save(db,1,{...body(),id:a.id,version:1,reason:'Rendimiento',data:{...data,yield_kg:8},operation_key:'base-formulation-000004'});
+ assert.equal(b.data.source_key,key);assert.equal(b.data.lines[0].mix_group,'esencias');assert.equal(db.s.rows.length,1);
+});
