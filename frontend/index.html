@@ -464,6 +464,13 @@ h1,h2,h3,h4,.os{font-family:'Oswald',sans-serif;letter-spacing:.3px}
 .ct-formula-line{grid-template-columns:minmax(200px,2fr) 1fr 80px 1fr auto!important;align-items:end}
 .ct-component>b{display:block;margin-bottom:8px}
 @media(max-width:760px){.ct-formula-line{grid-template-columns:1fr 1fr!important}.ct-formula-line>label:first-child{grid-column:1/-1}}
+.customer-orders{border:1px solid var(--line);border-radius:12px;background:var(--card,#fff);padding:16px;margin:0 0 20px}
+.customer-orders>label{display:block;font-weight:600;font-size:13px;margin-bottom:8px}
+.customer-orders>select{width:100%;max-width:650px;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--card,#fff);color:inherit}
+.customer-orders h3{font-size:16px;margin:16px 0 10px}.customer-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.customer-totals>div{background:var(--bg,#f5f3ef);padding:12px;border-radius:8px}.customer-totals span{display:block;font-size:12px}.customer-totals strong{display:block;font-size:21px;margin-top:6px;font-variant-numeric:tabular-nums}
+.customer-orders p{font-size:12px;color:var(--muted);line-height:1.5;margin:12px 0 0}
+@media(max-width:600px){.customer-totals{grid-template-columns:1fr}.customer-totals>div{display:flex;align-items:center;justify-content:space-between;gap:10px}.customer-totals strong{margin:0}}
 </style>
 <script>
 /* BEGIN ORDER FINANCE CORE */
@@ -1087,7 +1094,7 @@ function pageHead(title, sub){
    VIEWS
    ============================================================ */
 let vendFilter='todos';
-function setVendFilter(v){vendFilter=v;renderView();}
+function setVendFilter(v){vendFilter=v;orderCustomerFilter='';renderView();}
 function vendedorFilterBar(){
   const vends=[...new Set(ORDERS.map(o=>o.vendedor))].sort();
   return `<div class="filters" style="margin-bottom:14px"><button class="fchip ${vendFilter==='todos'?'on':''}" onclick="setVendFilter('todos')">Todos los vendedores</button>${vends.map(n=>`<button class="fchip ${vendFilter===n?'on':''}" onclick="setVendFilter('${n}')">${n}</button>`).join('')}</div>`;
@@ -1117,6 +1124,53 @@ function orderSellerSalesHTML(){
   return `<section class="seller-sales" aria-label="Ventas por vendedor"><div class="seller-sales-head"><h2>Ventas por vendedor · ${year}</h2><p>Facturado neto sin IVA · descuentos y notas de crédito incluidos</p></div><div class="seller-sales-grid">${card('Todos los vendedores',data.total,'todos',vendFilter==='todos')}${data.rows.map(r=>card(r.name,r.amount,r.name,vendFilter===r.name)).join('')}</div><p class="seller-sales-note">Acumulado por año del pedido, incluidos los entregados y pagados. Pulsa un vendedor para ver sus pedidos; buscar o filtrar por estado no cambia estos importes.${data.undated?' Incluye '+data.undated+' pedido(s) facturado(s) sin fecha, igual que el reporte anual.':''}</p></section>`;
 }
 function porVend(list){return vendFilter==='todos'?list:list.filter(o=>(String(o.vendedor||'').trim()||'Sin vendedor')===vendFilter);}
+
+// Clientes de los pedidos visibles para Gerencia y Jefatura de Ventas.
+let orderCustomerFilter='';
+function orderCustomerKey(o){
+ const tax=String(o.ruc||'').replace(/[\s.\-]/g,'').toUpperCase();
+ if(tax&&/^[A-Z0-9]+$/.test(tax)&&!/^0+$/.test(tax))return 'r:'+tax;
+ const name=String(o.client||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
+ return name?'n:'+name:'o:'+String(o.id);
+}
+function orderCustomers(orders,seller){
+ const groups=new Map();
+ for(const o of orders){
+  if(seller!=='todos'&&(String(o.vendedor||'').trim()||'Sin vendedor')!==seller)continue;
+  const key=orderCustomerKey(o);if(!groups.has(key))groups.set(key,{key,name:String(o.client||'').trim()||'Cliente sin nombre · '+o.id,tax:String(o.ruc||'').trim(),orders:[]});
+  groups.get(key).orders.push(o);
+ }
+ return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'es')||a.key.localeCompare(b.key));
+}
+function orderCustomerPending(o,summary){
+ if(['ANULADO','CANCELADO'].includes(o.state))return 0;
+ const deliveries=Array.isArray(o.entregas)?o.entregas:[];
+ if(summary.invoices.length&&!deliveries.length)return 0;
+ const products=new Map(),billed=new Map();
+ for(const p of o.products||[]){const line=products.get(p.name)||{qty:0,value:0};line.qty+=Number(p.qty||0);line.value+=Number(p.qty||0)*Number(p.price||0);products.set(p.name,line);}
+ for(const e of deliveries)if(String(e.numeroFactura||'').trim())for(const p of e.items||[])billed.set(p.name,(billed.get(p.name)||0)+Number(p.qty||0));
+ let gross=0;for(const [name,p] of products)if(p.qty>0)gross+=Math.max(0,p.qty-(billed.get(name)||0))*p.value/p.qty;
+ return gross*(1-Math.min(100,Math.max(0,Number(o.descuento||0)))/100);
+}
+function orderCustomerTotals(orders,year){
+ let net=0,annual=0,pending=0,invoicedOrders=0,undated=0;
+ for(const o of orders){const s=CandyFinance.summary(o);if(s.invoices.length){const cents=Math.round(s.base*100);net+=cents;invoicedOrders++;const date=parseFecha(o.fechaOrden);if(date===null)undated++;else if(new Date(date).getFullYear()===year)annual+=cents;}pending+=Math.round(orderCustomerPending(o,s)*100);}
+ return {net:net/100,annual:annual/100,pending:pending/100,invoicedOrders,undated};
+}
+function setOrderCustomerFilter(key){
+ if(!verTodo())return;
+ orderCustomerFilter=orderCustomers(ORDERS,vendFilter).some(c=>c.key===key)?key:'';renderView();
+}
+function porPedidoCliente(list){return !verTodo()||!orderCustomerFilter?list:list.filter(o=>orderCustomerKey(o)===orderCustomerFilter);}
+function orderCustomerFilterHTML(){
+ if(!verTodo())return '';
+ const clients=orderCustomers(ORDERS,vendFilter),esc=financeEscape;
+ const selected=clients.find(c=>c.key===orderCustomerFilter);if(!selected)orderCustomerFilter='';
+ const year=Number(new Intl.DateTimeFormat('en',{year:'numeric',timeZone:'America/Guayaquil'}).format(new Date()));
+ let result=`<section class="customer-orders" aria-label="Pedidos por cliente"><label for="orderCustomerSelect">Cliente · ${esc(vendFilter==='todos'?'todos los vendedores':vendFilter)}</label><select id="orderCustomerSelect" onchange="setOrderCustomerFilter(this.value)"><option value="">Todos los clientes (${clients.length})</option>${clients.map(c=>`<option value="${esc(c.key)}" ${c.key===orderCustomerFilter?'selected':''}>${esc(c.name)}${c.tax?' · '+esc(c.tax):' · Sin identificación'}</option>`).join('')}</select>`;
+ if(selected){const s=orderCustomerTotals(selected.orders,year);result+=`<h3>${esc(selected.name)}</h3><div class="customer-totals"><div><span>Total facturado histórico</span><strong>${money(s.net)}</strong></div><div><span>Facturado · pedidos de ${year}</span><strong>${money(s.annual)}</strong></div><div><span>Pendiente de facturar</span><strong>${money(s.pending)}</strong></div></div><p>${s.invoicedOrders} pedidos con factura. Importes sin IVA; el facturado incluye descuentos y notas de crédito, también de pedidos entregados y pagados. ${vendFilter==='todos'?'Incluye todos los vendedores.':'Solo incluye pedidos asignados a '+esc(vendFilter)+'.'} Totales del historial registrado, independientes del buscador y del filtro de estado. El pendiente corresponde a unidades aún sin facturar; una nota de crédito no vuelve a sumarlas como pendientes.${s.undated?' '+s.undated+' pedido(s) sin fecha incluidos solo en el histórico.':''}</p>`;}
+ return result+'</section>';
+}
 
 function renderView(){
   if(currentView==='formulaciones'&&document.getElementById('bfEditorForm'))return;
@@ -1193,7 +1247,7 @@ function renderView(){
 
   else if(v==='todos-g'){
     html=listView({title:'Pedidos',sub:'Todos los pedidos de todos los vendedores',
-      baseFn:()=>porVend(stateBase()),cardFn:o=>orderCard(o),chips:true,note:orderSellerSalesHTML()});
+      baseFn:()=>porPedidoCliente(porVend(stateBase())),cardFn:o=>orderCard(o),chips:true,note:orderSellerSalesHTML()+orderCustomerFilterHTML()});
   }
 
   else if(v==='mis-movimientos'){ html=viewFacturacionLog(); }
