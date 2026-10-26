@@ -8,6 +8,18 @@ test('convierte unidades, usa rendimiento vendible e incluye empaque y fabricaci
 test('cambio de costo promedio recalcula sin alterar fotografía previa',()=>{const f=core.formula(formula()),old=core.calculate(f,inventory),next=core.calculate(f,inventory.map(x=>({...x,costo_prom:4})));assert.equal(old.total,25.2);assert.equal(next.total,44.6);});
 test('sin costo no presenta un total ni margen engañosos',()=>{const c=core.calculate(core.formula(formula()),inventory.map(i=>({...i,costo_prom:0})));assert.equal(c.complete,false);assert.equal(c.total,null);assert.equal(c.per_unit,null);assert.equal(c.margin_percent,null);assert.equal(c.missing.length,2);});
 test('no convierte volumen en masa ni usa productos terminados como materia prima',()=>{assert.throws(()=>core.convert(1,'L','kg'),/No se puede/);const f=formula();f.lines[0].unit='L';assert.equal(core.calculate(core.formula(f),inventory).complete,false);assert.equal(core.calculate(core.formula(formula()),inventory.map(i=>({...i,tipo:'producto_terminado'}))).complete,false);});
+test('KILOS y GRAMOS del inventario equivalen a kg y g en las recetas',()=>{
+ assert.equal(core.convert(1,'kg','KILOS'),1);
+ assert.equal(core.convert(1,'KG.','KILOS'),1);
+ assert.equal(core.convert(1000,'g','KILOS'),1);
+ assert.equal(core.convert(1,'KILOS','g'),1000);
+ assert.equal(core.convert(1000,'GRAMOS','kg'),1);
+ const inv=inventory.map(i=>i.id===1?{...i,unidad:'KILOS'}:i);
+ const result=core.calculate(core.formula(formula()),inv);
+ assert.equal(result.complete,true);
+ assert.equal(result.total,25.2);
+ assert.throws(()=>core.convert(1,'kg','CAJAS'),/No se puede convertir/);
+});
 test('rendimiento inválido, línea vacía y precio manual de materia prima se rechazan',()=>{assert.throws(()=>core.formula({...formula(),yield_quantity:0}),/Rendimiento/);assert.throws(()=>core.formula({...formula(),lines:[]}),/Incluye/);const f=formula();f.lines[0]={mode:'manual',kind:'material',quantity:1,unit:'kg'};assert.throws(()=>core.formula(f),/vincularse/);});
 test('gasto Marketing sin respaldo y posterior respaldo HTTPS',()=>{const e=core.expense(expense());assert.equal(e.attachment,null);assert.equal(e.category,'Marketing');assert.equal(core.expense({...e,attachment:{url:'https://example.test/a.pdf',name:'Factura.pdf'}}).attachment.name,'Factura.pdf');});
 test('rechaza fechas imposibles, fracciones de centavo y URL ejecutable',()=>{assert.throws(()=>core.expense({...expense(),date:'2026-02-30'}),/Fecha/);assert.throws(()=>core.expense({...expense(),amount:1.001}),/decimales/);assert.throws(()=>core.expense({...expense(),attachment:{url:'javascript:alert(1)',name:'x'}}),/Adjunto/);assert.throws(()=>core.expense({...expense(),category:'Inventario'}),/Categoría/);});
