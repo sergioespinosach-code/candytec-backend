@@ -3,16 +3,17 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const master=require('../lib/product-master');
 const data=()=>({nombre:'YumYum 5 kg',sku:'',marca:'YumYum',categoria:'Caramelo duro',familia:'Caramelo duro',peso_unitario_g:5,peso_masa_g:5,presentacion:'Funda',unidades_presentacion:1000,peso_neto_kg:5,peso_bulto:5});
 function dbFixture(role='gerente'){
- const s={materials:[{id:17,nombre:'Lámina YumYum',tipo:'materia_prima',unidad:'kg',costo_prom:6}],formulas:[{id:7}],catalog:[],inventory:[],movements:[],audit:[],ops:[],role,fail:false};let backup;
+ const s={materials:[{id:17,nombre:'Lámina YumYum',tipo:'materia_prima',unidad:'kg',costo_prom:6}],formulas:[{id:7}],catalog:[],inventory:[],movements:[],audit:[],ops:[],orders:[],role,fail:false};let backup;
  const db={release(){},async query(sql,p=[]){const result=rows=>({rows:structuredClone(rows)});
  if(sql==='BEGIN'){backup=structuredClone(s);return result([]);}if(sql==='ROLLBACK'){Object.assign(s,backup);return result([]);}if(sql==='COMMIT'||sql.includes('pg_advisory'))return result([]);
  if(sql.includes('FROM users'))return result(s.role?[{id:1,name:'Gerente',role:s.role}]:[]);
  if(sql.startsWith('SELECT * FROM business_operations'))return result(s.ops.filter(x=>x.operation_key===p[0]));
  if(sql.startsWith('SELECT * FROM catalogo'))return result(s.catalog.filter(x=>x.id===p[0]));
  if(sql.startsWith('SELECT id FROM catalogo'))return result(s.catalog.filter(x=>x.nombre.toLowerCase()===p[0].toLowerCase()&&x.id!==p[1]));
+ if(sql.startsWith('SELECT products,entregas,factura,financial_data,estado FROM pedidos'))return result(s.orders);
  if(sql.startsWith('SELECT id FROM base_formulations'))return result(s.formulas.filter(x=>x.id===p[0]));
  if(sql.startsWith('UPDATE catalogo SET formula_id')){const row=s.catalog.find(x=>x.id===p[1]);row.formula_id=p[0];return result([row]);}
- if(sql.startsWith('INSERT INTO catalogo')){if(p[1]&&s.catalog.some(x=>x.sku?.toLowerCase()===p[1].toLowerCase()))throw Object.assign(Error('duplicado'),{code:'23505'});const row={id:s.catalog.length+1,nombre:p[0],sku:p[1],ficha:JSON.parse(p[2]),peso_bulto:p[3],activo:true,version:1};s.catalog.push(row);return result([row]);}
+ if(sql.startsWith('INSERT INTO catalogo')){if(p[1]&&s.catalog.some(x=>x.sku?.toLowerCase()===p[1].toLowerCase()))throw Object.assign(Error('duplicado'),{code:'23505'});const row={id:s.catalog.length+1,nombre:p[0],sku:p[1],ficha:JSON.parse(p[2]),peso_bulto:p[3],activo:p[4],version:1};s.catalog.push(row);return result([row]);}
  if(sql.startsWith("UPDATE catalogo SET sku='CT-P-'")){const r=s.catalog.find(x=>x.id===p[0]);r.sku='CT-P-'+r.id;return result([r]);}
  if(sql.startsWith('UPDATE catalogo SET sku=$1')){const r=s.catalog.find(x=>x.id===p[3]);Object.assign(r,{sku:p[0],ficha:JSON.parse(p[1]),peso_bulto:p[2],version:r.version+1});return result([r]);}
  if(sql.startsWith('INSERT INTO inventario')){if(!s.inventory.some(x=>x.nombre===p[0]))s.inventory.push({id:s.inventory.length+1,tipo:'producto_terminado',nombre:p[0],stock:0});return result([]);}
@@ -31,6 +32,20 @@ test('ficha parcial permite empezar sin inventar marca, pesos o categoría',()=>
 test('distingue peso pieza, masa y presentación y rechaza valores imposibles',()=>{const p=master.validate(data());assert.equal(p.ficha.peso_unitario_g,5);assert.equal(p.peso_bulto,5);assert.throws(()=>master.validate({...data(),peso_masa_g:6}),/masa/);assert.throws(()=>master.validate({...data(),unidades_presentacion:1.5}),/enteras/);assert.throws(()=>master.validate({...data(),peso_neto_kg:-1}),/peso_neto/);});
 test('nuevo producto crea un solo ítem en inventario y SKU automático aun al reintentar',async()=>{const db=dbFixture(),b=body();const a=await master.save(db,1,b),retry=await master.save(db,1,b);assert.equal(a.sku,'CT-P-1');assert.equal(retry.id,a.id);assert.equal(db.s.catalog.length,1);assert.equal(db.s.inventory.length,1);assert.equal(db.s.audit.length,1);});
 test('editar ficha conserva nombre, ID, inventario e historial',async()=>{const db=dbFixture();await master.save(db,1,body());const r=await master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002',data:{...data(),marca:'YumYum Premium'}}));assert.equal(r.id,1);assert.equal(r.nombre,'YumYum 5 kg');assert.equal(r.version,2);assert.equal(db.s.inventory.length,1);assert.equal(db.s.audit[1].before.ficha.marca,'YumYum');});
+test('lista nombres vendidos que faltan en catálogo sin confundir anulados ni duplicados',()=>{
+ const sold={estado:'ENTREGADO',factura:'FAC-1',products:[{name:'Acidazo',qty:2,price:5}],entregas:[]};
+ assert.deepEqual(master.historicalNames([sold,{...sold,estado:'ANULADO'},{...sold,products:[{name:'Sin factura',qty:1}],factura:null}],[]),['Acidazo']);
+ assert.deepEqual(master.historicalNames([sold],[{nombre:'ACIDAZO'}]),[]);
+});
+test('crea ficha histórica sin inventario y permite completar sus costos sin reactivarla',async()=>{
+ const db=dbFixture();db.s.orders.push({estado:'ENTREGADO',factura:'FAC-1',products:[{name:'Acidazo',qty:2,price:5}],entregas:[]});
+ const b=body({action:'create_archived',data:{...data(),nombre:'Acidazo',formula_id:7},operation_key:'product-operation-000010'});
+ const created=await master.save(db,1,b);assert.equal(created.activo,false);assert.equal(created.formula_id,7);assert.equal(db.s.inventory.length,0);
+ assert.equal((await master.save(db,1,b)).id,created.id);
+ const edited=await master.save(db,1,body({id:created.id,version:1,operation_key:'product-operation-000011',data:{...data(),nombre:'Acidazo',marca:'Acidazo',formula_id:7}}));
+ assert.equal(edited.activo,false);assert.equal(edited.ficha.marca,'Acidazo');assert.equal(db.s.inventory.length,0);assert.equal(db.s.audit.length,2);
+ await assert.rejects(master.save(db,1,body({action:'create_archived',data:{...data(),nombre:'Nunca facturado'},operation_key:'product-operation-000012'})),{status:409});
+});
 test('no renombra referencias históricas ni sobreescribe ficha desactualizada',async()=>{const db=dbFixture();await master.save(db,1,body());await assert.rejects(master.save(db,1,body({id:1,version:1,operation_key:'product-operation-000002',data:{...data(),nombre:'Otro'}})),/histórico/);await assert.rejects(master.save(db,1,body({id:1,version:2,operation_key:'product-operation-000003'})),{status:409});});
 test('eliminar da de baja existencias una vez y restaurar conserva saldo cero',async()=>{
  const db=dbFixture();await master.save(db,1,body());db.s.inventory[0].stock=10;
@@ -61,6 +76,14 @@ test('interfaz reintenta con la misma operación sin confirmar antes del servido
  let failing=true,loaded=0;const requests=[],nodes={};const ctx=vm.createContext({window:{addEventListener(){}},document:{getElementById:id=>nodes[id]||(nodes[id]={value:'',disabled:false,textContent:'',hidden:false})},crypto:{randomUUID:()=> 'product-ui-operation-0001'},confirm:()=>true,toast(){},apiPost:async(url,b)=>{requests.push(structuredClone(b));if(failing)throw Error('Sin red');return {id:1};}});
  vm.runInContext(html.slice(html.indexOf('/* Mis productos: fichas'),html.lastIndexOf('</script>')),ctx);
  vm.runInContext('PM.editor={activo:true};',ctx);ctx.pmRead=()=>data();ctx.pmLoad=async()=>{loaded++;};await ctx.pmSave('save');assert.equal(nodes.pmFields.disabled,true);assert.equal(loaded,0);assert.equal(nodes.pmSaveButton.textContent,'Reintentar cambio');failing=false;await ctx.pmSave('save');assert.equal(requests[0].operation_key,requests[1].operation_key);assert.equal(loaded,1);
+});
+test('apartado descontinuados permite completar ficha sin pedir restauración',async()=>{
+ const nodes={},requests=[],ctx=vm.createContext({window:{addEventListener(){}},document:{getElementById:id=>nodes[id]||(nodes[id]={value:'',disabled:false,textContent:'',hidden:false})},bcEsc:v=>String(v??''),crypto:{randomUUID:()=> 'historical-ui-operation-0001'},toast(){},apiPost:async(url,body)=>{requests.push(body);return {id:2};}});
+ vm.runInContext(html.slice(html.indexOf('/* Mis productos: fichas'),html.lastIndexOf('</script>')),ctx);
+ vm.runInContext("PM.rows=[{id:1,nombre:'Archivado',activo:false,sku:'A',ficha:{}}];PM.historical=['Acidazo'];PM.filter='archived';PM.search='';",ctx);
+ ctx.pmRows();assert.match(nodes.pmRows.innerHTML,/Completar costos/);assert.match(nodes.pmRows.innerHTML,/Crear ficha histórica/);
+ vm.runInContext("PM.editor={nombre:'Acidazo',activo:false,ficha:{}};",ctx);ctx.pmRead=()=>({nombre:'Acidazo'});ctx.pmLoad=async()=>{};
+ ctx.pmLock();assert.equal(nodes.pmFields.disabled,false);await ctx.pmSave('save');assert.equal(requests[0].action,'create_archived');assert.equal(requests[0].data.nombre,'Acidazo');
 });
 test('menú y protección del refresco incluyen Mis productos y scripts compilan',()=>{assert.match(html,/v:'mis-productos'/);assert.match(html,/VISTAS_FORMULARIO=\[[^;]*'mis-productos'/);for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))new vm.Script(script[1]);});
 
