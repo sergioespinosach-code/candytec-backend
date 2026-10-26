@@ -981,6 +981,7 @@ const gerNav=[
   {v:'por-completar', ic:'◪', label:'Pedidos por completar', count:o=>o.filter(esPedidoPorCompletar).length},
   {v:'produccion-logistica', ic:'◫', label:'Producción y logística', count:()=>pedidosPorFabricar().length},
   {v:'reportes', ic:'◔', label:'Reportes y análisis'},
+  {v:'estado-resultados', ic:'$', label:'Estado de resultados'},
   {v:'formulaciones', ic:'◈', label:'Formulaciones'},
   {v:'mis-productos', ic:'▦', label:'Mis productos'},
   {v:'centro-costos', ic:'◈', label:'Centro de costos'},
@@ -1191,6 +1192,7 @@ function renderView(){
   else if(v==='movimientos'){ html=viewMovimientos(); }
   else if(v==='dashboard') html=viewDashboard();
   else if(v==='reportes') html=viewReportes();
+  else if(v==='estado-resultados') html=erView();
   else if(v==='produccion-logistica') html=viewProduccionLogistica();
   else if(v==='planificador-despachos') html=viewDispatchPlanner();
   else if(v==='costos-logisticos') html=viewCostosLogisticos();
@@ -5233,7 +5235,7 @@ function paintRole(){
 const NAV_GROUPS = [
   {id:'resumen',label:'Resumen',icon:'◈',views:['dashboard','reportes']},
   {id:'ventas',label:'Ventas y clientes',icon:'◎',views:['nuevo','mis-pedidos','todos-g','todos','por-completar','completados','completados-v','clientes','clientes-todos']},
-  {id:'finanzas',label:'Facturación y gastos',icon:'$',views:['por-facturar','cobranzas','cobranzas-v','control-gastos','mis-movimientos']},
+  {id:'finanzas',label:'Facturación y gastos',icon:'$',views:['por-facturar','cobranzas','cobranzas-v','control-gastos','estado-resultados','mis-movimientos']},
   {id:'productos',label:'Productos y costos',icon:'▦',views:['mis-productos','formulaciones','centro-costos']},
   {id:'bodega',label:'Producción y bodega',icon:'▤',views:['produccion','ingresos-previos','consumo-mp','pedidos-produccion','bodega-mp','bodega-empaques','bodega-pt','movimientos']},
   {id:'despachos',label:'Despachos y logística',icon:'◫',views:['planificador-despachos','produccion-logistica','producto-listo','por-despachar','en-transito','entregados','costos-logisticos']},
@@ -6120,6 +6122,40 @@ const BC={kind:null,data:null,editor:null,pending:null,busy:false,uploading:fals
 function bcEsc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function bcMoney(v,d=2){return v==null?'Pendiente':'$'+Number(v).toLocaleString('es-EC',{minimumFractionDigits:d,maximumFractionDigits:d});}
 function bcToday(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+/* Estado de resultados de gestión: rango del ejercicio y costos vigentes. */
+const ER={from:bcToday().slice(0,4)+'-01-01',to:bcToday(),data:null,epoch:0};
+function erView(){if(!isGerente())return pageHead('Sin acceso','Solo Gerencia puede consultar resultados.');setTimeout(erLoad,0);return pageHead('Estado de resultados','Utilidad estimada con ventas facturadas, costos vigentes, logística y gastos registrados.')+'<section id="erRoot" class="bc"><p>Calculando resultados…</p></section>';}
+async function erLoad(){
+ if(currentView!=='estado-resultados'||!isGerente())return;
+ const root=document.getElementById('erRoot'),epoch=++ER.epoch,token=AUTH_TOKEN;if(!root)return;
+ ER.data=null;
+ if(!ER.from||!ER.to||ER.from>ER.to){root.textContent='Elige un rango válido de fechas.';return;}
+ root.textContent='Calculando resultados…';
+ try{const data=await apiGet('/api/resultados?from='+encodeURIComponent(ER.from)+'&to='+encodeURIComponent(ER.to));if(epoch!==ER.epoch||currentView!=='estado-resultados'||!root.isConnected||token!==AUTH_TOKEN)return;ER.data=data;erRender();}
+ catch(e){if(epoch===ER.epoch&&root.isConnected)root.innerHTML='<p class="bc-error">'+bcEsc(e.message)+'</p>'+erControls();}
+}
+function erControls(){return '<div class="bc-toolbar"><label>Desde <input type="date" value="'+bcEsc(ER.from)+'" onchange="ER.from=this.value;ER.data=null;document.getElementById(\'erExcelBtn\').disabled=true"></label><label>Hasta <input type="date" value="'+bcEsc(ER.to)+'" onchange="ER.to=this.value;ER.data=null;document.getElementById(\'erExcelBtn\').disabled=true"></label><button type="button" class="btn btn-gold" onclick="erLoad()">Calcular período</button><button type="button" id="erExcelBtn" class="btn" onclick="erExcel()" '+(!ER.data?'disabled':'')+'>Descargar Excel</button></div>';}
+function erRender(){
+ const root=document.getElementById('erRoot'),r=ER.data;if(!root||!r)return;
+ const row=(name,value,strong=false)=>'<tr'+(strong?' style="font-weight:700"':'')+'><td>'+bcEsc(name)+'</td><td style="text-align:right">'+(value==null?'Pendiente de completar costos':bcMoney(value))+'</td></tr>';
+ root.innerHTML=erControls()+'<p class="bc-note">Período: '+bcEsc(r.from)+' a '+bcEsc(r.to)+' · '+r.orders+' pedidos · '+r.invoices+' facturas. Ventas sin IVA. Costos por presentación calculados con los precios actuales de las materias primas.</p>'+
+ (r.complete?'<div class="bc-kpis">'+bcKpi('Ventas netas',bcMoney(r.sales))+bcKpi('Utilidad bruta',bcMoney(r.gross))+bcKpi('Resultado estimado',bcMoney(r.estimated))+'</div>':'<div class="bc-error"><b>Faltan costos de '+r.missing.length+' líneas y '+r.noDetail.length+' facturas sin detalle.</b> El resultado final queda pendiente; los costos conocidos se muestran para que puedas revisar la información.</div>')+
+ '<section class="bc-panel"><h3>Resultado del período</h3><div class="bc-scroll"><table><thead><tr><th>Concepto</th><th style="text-align:right">Valor ($)</th></tr></thead><tbody>'+
+ row('Ventas facturadas netas, sin IVA',r.sales,true)+row('Costo conocido de productos facturados',-r.knownCost)+row('Utilidad bruta',r.gross,true)+row('Transporte y estibaje registrados',-r.logistics)+row('Gastos de fabricación registrados',-r.manufacturing)+row('Gastos operativos y comerciales registrados',-r.operating)+row('Resultado estimado',r.estimated,true)+'</tbody></table></div><p class="bc-note">IVA informativo de las facturas: '+bcMoney(r.iva)+'; no forma parte de la utilidad. '+(r.complete?'':'Subtotal calculado con costos conocidos: '+bcMoney(r.knownResult)+'. No representa utilidad definitiva.')+'</p></section>'+
+ '<section class="bc-panel"><h3>Evolución mensual</h3><div class="bc-scroll"><table><thead><tr><th>Mes</th><th>Ventas</th><th>Costo producto</th><th>Logística</th><th>Gastos</th><th>Resultado</th></tr></thead><tbody>'+r.months.map(m=>'<tr><td>'+bcEsc(m.month)+'</td><td>'+bcMoney(m.sales)+'</td><td>'+bcMoney(m.cost)+'</td><td>'+bcMoney(m.logistics)+'</td><td>'+bcMoney(m.expenses)+'</td><td>'+(m.profit===null?'Incompleto':bcMoney(m.profit))+'</td></tr>').join('')+'</tbody></table></div></section>'+
+ '<section class="bc-panel"><h3>Gastos por categoría</h3><div class="bc-scroll"><table><thead><tr><th>Categoría</th><th>Valor</th></tr></thead><tbody>'+(r.categories.map(c=>'<tr><td>'+bcEsc(c.name)+'</td><td>'+bcMoney(c.amount)+'</td></tr>').join('')||'<tr><td colspan="2">Sin gastos registrados en este período.</td></tr>')+'</tbody></table></div></section>'+
+ (r.missing.length||r.noDetail.length?'<section class="bc-panel"><h3>Costos pendientes de revisar</h3><ul>'+r.missing.map(x=>'<li>'+bcEsc(x.order+' · '+x.invoice+' · '+x.product+' ('+x.qty+') · '+x.reason)+'</li>').join('')+r.noDetail.map(x=>'<li>'+bcEsc(x.order+' · '+x.invoice+' · factura sin detalle de unidades')+'</li>').join('')+'</ul></section>':'')+
+ '<section class="bc-panel"><h3>Cómo se calcula</h3><ul>'+r.notes.map(x=>'<li>'+bcEsc(x)+'</li>').join('')+'</ul></section>';
+}
+function erExcel(){
+ const r=ER.data;if(!r||!isGerente())return;if(typeof XLSX==='undefined'){toast('No se pudo cargar Excel. Revisa la conexión.');return;}
+ const book=XLSX.utils.book_new(),add=(name,rows)=>{const sheet=XLSX.utils.aoa_to_sheet(rows);sheet['!cols']=Array.from({length:rows[0].length},(_,i)=>({wch:i===0?42:23}));sheet['!autofilter']={ref:sheet['!ref']};XLSX.utils.book_append_sheet(book,sheet,name);};
+ add('Estado de resultados',[['Concepto','USD'],['Desde',r.from],['Hasta',r.to],['Ventas netas sin IVA',r.sales],['Costo conocido de producto',-r.knownCost],['Utilidad bruta',r.gross],['Logística',-r.logistics],['Gastos de fabricación',-r.manufacturing],['Gastos operativos y comerciales',-r.operating],['Resultado estimado',r.estimated],['IVA informativo',r.iva],['Costos completos',r.complete?'Sí':'No']]);
+ add('Evolución mensual',[['Mes','Ventas','Costo producto','Logística','Gastos','Resultado'],...r.months.map(x=>[x.month,x.sales,x.cost,x.logistics,x.expenses,x.profit])]);
+ add('Categorías de gastos',[['Categoría','USD'],...r.categories.map(x=>[x.name,x.amount])]);
+ add('Pendientes',[['Pedido','Factura','Producto','Unidades','Motivo'],...r.missing.map(x=>[x.order,x.invoice,x.product,x.qty,x.reason]),...r.noDetail.map(x=>[x.order,x.invoice,'',null,'Factura sin detalle de unidades'])]);
+ add('Criterios',[['Criterio'],...r.notes.map(x=>[x])]);XLSX.writeFile(book,'CandyTec_Resultados_'+r.from+'_a_'+r.to+'.xlsx');
+}
 function bcView(kind){if(kind==='formula'?!isGerente():!(isGerente()||esFacturacion()))return pageHead('Sin acceso','Este módulo requiere permisos de gerencia o facturación.');setTimeout(()=>bcLoad(kind),0);return pageHead(kind==='formula'?'Centro de costos':'Control de gastos',kind==='formula'?'Fórmulas, rendimiento real y costos actuales de tus productos.':'Conoce cuánto gastas y dónde. Comprobantes opcionales.')+'<section id="bcRoot" class="bc"><p>Cargando información…</p></section>';}
 async function bcLoad(kind){if(currentView!==(kind==='formula'?'centro-costos':'control-gastos'))return;const epoch=++BC.epoch,token=AUTH_TOKEN;BC.kind=kind;const root=document.getElementById('bcRoot');if(!root)return;try{const data=await apiGet(kind==='formula'?'/api/business/formulas':'/api/business/expenses?month='+BC.month);if(epoch!==BC.epoch||token!==AUTH_TOKEN||!root.isConnected)return;BC.data=data;if(BC.editor&&BC.editor.kind===kind)bcRenderEditor();else bcList();}catch(e){if(epoch===BC.epoch&&root.isConnected){root.innerHTML='<p class="bc-error">'+bcEsc(e.message)+'</p><button class="btn" onclick="bcLoad(BC.kind)">Reintentar</button>';}}}
 function bcOptions(values,value){return values.map(v=>'<option value="'+bcEsc(v)+'" '+(v===value?'selected':'')+'>'+bcEsc(v)+'</option>').join('');}
